@@ -55,19 +55,32 @@ Two behaviours worth knowing about up front:
 - SEO: dynamic titles, Open Graph and Twitter metadata, canonical URLs, JSON-LD
   (Person, WebSite, CreativeWork, BreadcrumbList), `robots.txt` and a sitemap generator
 
-**Admin panel** (`/admin`)
+**Admin panel** (`/admin`) — an Apple-inspired system UI, separate from the site's look
 
-- JWT login (httpOnly cookie + bearer token), protected routes, session restore
-- Dashboard: content counts, traffic, unread messages, recent activity
-- Projects CMS: create, edit, delete, publish/unpublish, feature/unfeature, ordering
-- Experience CMS: create, edit, delete, reorder, published flag
-- Skills CMS: create, edit, delete, reorder, colour and icon
-- Messages: search, filter, read/unread, delete, reply by email
-- Profile CMS: identity, hero content, biography, editable statistics, social links,
-  images, music widget configuration
-- Analytics: views over time, top projects, top pages, devices, referrers, recent events
-- Settings: SEO defaults, contact email, footer note, analytics toggle
-- Image uploads (Cloudinary when configured, local disk otherwise) with URL fallback
+- **Light, dark or automatic appearance**, stored per device and applied before first
+  paint (no colour flash); iPadOS-style grouped sidebar with an unread-messages badge
+- **⌘K / Ctrl+K command palette**: jump to any page, open a project by name, create
+  content, switch appearance or sign out — fully keyboard driven
+- JWT login (httpOnly cookie + bearer token), protected routes, session restore; a
+  wrong password shakes the form and returns focus to the field
+- Dashboard: greeting, counted-up summary tiles, 30-day views chart, recent messages,
+  library shortcuts and recent activity
+- Projects CMS: debounced search, status filter, **optimistic** publish / feature
+  toggles with rollback, responsive rows that recompose on phones
+- Experience & Skills CMS: **drag-to-reorder** (pointer, touch, or arrow keys on the
+  handle, with screen-reader announcements), saved optimistically
+- Messages: Mail-style split view on large screens, bottom sheet on phones, optimistic
+  read / unread, reply by email
+- Profile & Settings load the **stored** records from the admin API — unpublished
+  statistics and links stay visible and are never dropped on save
+- Forms: floating "unsaved changes" bar, **⌘S / Ctrl+S** to save, discard, a
+  leave-page warning, inline validation that focuses the first invalid field
+- Analytics: smooth monotone chart with hover / keyboard inspection, animated
+  breakdowns, segmented 7 / 30 / 90-day ranges that keep data on screen while loading
+- Image uploads (Cloudinary when configured, local disk otherwise) with drag-and-drop
+  and URL fallback
+- Sheets, alerts and menus trap focus and close on Escape; motion honours
+  `prefers-reduced-motion`
 
 **API**
 
@@ -305,10 +318,12 @@ This project was validated end to end against a live PostgreSQL instance:
 | Check                                             | Result                                   |
 | ------------------------------------------------- | ---------------------------------------- |
 | `npm run lint` / `typecheck` / `build`            | clean across all three workspaces        |
-| `npm run test`                                    | 42 tests passing (unit + e2e)            |
+| `npm run test`                                    | 90 tests passing (61 web + 29 API)       |
 | `prisma migrate deploy` + `db:seed`               | applied and seeded from empty            |
 | Live API surface (public, auth, admin, analytics) | 90/90 assertions passing                 |
 | Dev server + API proxy                            | serves, proxies `/api` and `/uploads`    |
+| Admin visual sweep (every page, light + dark)     | 0 errors, 0 overflow at 1440–320 px      |
+| Admin interactions against the live API           | 19/19 browser checks passing             |
 
 The live pass covers: content endpoints, 404 handling, draft isolation, validation
 rejections, honeypot suppression, rate limiting (429), login with wrong and right
@@ -368,6 +383,9 @@ Checklist before going live:
 2. Sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD` from your environment
 3. Change the password immediately in any non-local environment
 
+Press **⌘K** (Ctrl+K) anywhere in the admin for the command palette. Appearance
+(automatic, light or dark) lives in the account menu and under *Settings*.
+
 The seeded social links point at platform home pages until you replace them — no
 invented handles, no fabricated statistics. The seeded statistics (years of
 experience, projects completed) are **editable and removable** from
@@ -385,6 +403,16 @@ stays crisp at any size and can never ship a broken image. Upload real artwork i
 Project imagery follows the same principle: `SmartImage` renders a generated cover
 from the project's accent colour, monogram, grid and layered gradients, then
 cross-fades to the real image when one exists. The layout is identical either way.
+
+The admin uses a second visual language — calm, Apple-style system UI — without
+forking the component library. Shared primitives (`Button`, form fields, `Badge`,
+loading / empty / error states) read a `SkinContext`: the public site renders the
+default `cinematic` skin, the admin root provides `system`. Admin colours are Apple's
+system palette as CSS variables (`sys-*` in Tailwind) under
+`html[data-admin-appearance]`, so one set of classes serves light and dark. Motion is
+quick and physical: springs for selection pills and segmented controls, the iOS
+deceleration curve for sheets and pages. The whole admin shell is code-split, so
+public visitors never download it.
 
 ---
 

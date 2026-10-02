@@ -279,6 +279,11 @@ export const adminApi = {
     }),
 
   /* Profile & settings ------------------------------------------------------ */
+  /** Stored profile, including unpublished statistics and links. */
+  getProfile: () => request<Profile>('/api/admin/profile', { auth: true }),
+
+  getSettings: () => request<SiteSettings>('/api/admin/settings', { auth: true }),
+
   updateProfile: (payload: Record<string, unknown>) =>
     request<Profile>('/api/admin/profile', { method: 'PATCH', auth: true, body: payload }),
 

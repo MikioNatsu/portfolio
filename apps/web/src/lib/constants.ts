@@ -10,17 +10,6 @@ export const NAV_LINKS = [
   { label: 'Contact', to: '/contact' },
 ] as const;
 
-export const ADMIN_NAV_LINKS = [
-  { label: 'Overview', to: '/admin', icon: 'LayoutDashboard' },
-  { label: 'Projects', to: '/admin/projects', icon: 'FolderKanban' },
-  { label: 'Experience', to: '/admin/experience', icon: 'Route' },
-  { label: 'Skills', to: '/admin/skills', icon: 'Sparkles' },
-  { label: 'Messages', to: '/admin/messages', icon: 'Mail' },
-  { label: 'Profile', to: '/admin/profile', icon: 'UserRound' },
-  { label: 'Analytics', to: '/admin/analytics', icon: 'Activity' },
-  { label: 'Settings', to: '/admin/settings', icon: 'Settings' },
-] as const;
-
 export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   DRAFT: 'Draft',
   PUBLISHED: 'Live',
@@ -93,4 +82,5 @@ export const STORAGE_KEYS = {
   theme: 'natsu.theme',
   introSeen: 'natsu.intro.seen',
   musicMuted: 'natsu.music.muted',
+  adminAppearance: 'natsu.admin.appearance',
 } as const;

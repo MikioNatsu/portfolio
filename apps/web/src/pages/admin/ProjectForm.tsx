@@ -1,16 +1,26 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CircleAlert, Save } from 'lucide-react';
-import type { ProjectStatus } from '@natsu/types';
+import { ChevronLeft } from 'lucide-react';
+import type { Project, ProjectStatus } from '@natsu/types';
 import { adminApi, ApiError } from '@/api/client';
-import { PROJECT_CATEGORIES } from '@/lib/constants';
-import { slugify } from '@/lib/utils';
-import { AdminPageHeader, Panel } from '@/components/admin/AdminUI';
-import { ImageUploader, StringListInput } from '@/components/admin/ImageUploader';
+import { InlineAlert, Panel } from '@/components/admin/Card';
+import { ColorField, LinesInput, TagInput } from '@/components/admin/Fields';
+import { ImageUploader } from '@/components/admin/ImageUploader';
+import { PageHeader } from '@/components/admin/PageHeader';
+import { SaveBar } from '@/components/admin/SaveBar';
+import { ConfirmDialog } from '@/components/admin/Sheet';
+import { PageSkeleton } from '@/components/admin/Skeleton';
+import { ProjectStatusBadge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Switch, Textarea } from '@/components/ui/Field';
-import { ErrorState, LoadingState } from '@/components/ui/States';
+import { ErrorState } from '@/components/ui/States';
+import { useToast } from '@/hooks/useToast';
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
+import { PROJECT_CATEGORIES } from '@/lib/constants';
+import { isHexColor, slugify } from '@/lib/utils';
+
+const FORM_ID = 'project-form';
 
 interface FormValues {
   title: string;
@@ -38,6 +48,8 @@ interface FormValues {
   technologies: string[];
 }
 
+type FormErrors = Partial<Record<keyof FormValues, string>>;
+
 const EMPTY: FormValues = {
   title: '',
   slug: '',
@@ -64,15 +76,91 @@ const EMPTY: FormValues = {
   technologies: [],
 };
 
+function toForm(project: Project): FormValues {
+  return {
+    title: project.title,
+    slug: project.slug,
+    category: project.category,
+    summary: project.summary,
+    description: project.description,
+    content: project.content ?? '',
+    problem: project.problem ?? '',
+    solution: project.solution ?? '',
+    features: project.features ?? [],
+    architecture: project.architecture ?? '',
+    challenges: project.challenges ?? '',
+    implementation: project.implementation ?? '',
+    results: project.results ?? '',
+    role: project.role ?? '',
+    year: project.year ? String(project.year) : '',
+    status: project.status,
+    featured: project.featured,
+    order: String(project.order),
+    githubUrl: project.githubUrl ?? '',
+    liveUrl: project.liveUrl ?? '',
+    coverImage: project.coverImage,
+    accentColor: project.accentColor ?? '#A855F7',
+    technologies: project.technologies.map((technology) => technology.name),
+  };
+}
+
+function validate(values: FormValues): FormErrors {
+  const errors: FormErrors = {};
+  if (!values.title.trim()) errors.title = 'A title is required.';
+  if (!slugify(values.slug)) errors.slug = 'A slug is required.';
+  if (!values.category.trim()) errors.category = 'Pick a category.';
+  if (!values.summary.trim()) errors.summary = 'A short summary is required.';
+  if (!values.description.trim()) errors.description = 'A description is required.';
+  if (values.githubUrl && !/^https?:\/\//.test(values.githubUrl))
+    errors.githubUrl = 'Must start with http:// or https://';
+  if (values.liveUrl && !/^https?:\/\//.test(values.liveUrl))
+    errors.liveUrl = 'Must start with http:// or https://';
+  if (!isHexColor(values.accentColor)) errors.accentColor = 'Use a six-digit hex colour.';
+  return errors;
+}
+
+function toPayload(values: FormValues): Record<string, unknown> {
+  return {
+    title: values.title.trim(),
+    slug: slugify(values.slug),
+    category: values.category.trim(),
+    summary: values.summary.trim(),
+    description: values.description.trim(),
+    content: values.content.trim() || null,
+    problem: values.problem.trim() || null,
+    solution: values.solution.trim() || null,
+    features: values.features.filter(Boolean),
+    architecture: values.architecture.trim() || null,
+    challenges: values.challenges.trim() || null,
+    implementation: values.implementation.trim() || null,
+    results: values.results.trim() || null,
+    role: values.role.trim() || null,
+    year: values.year ? Number(values.year) : null,
+    status: values.status,
+    featured: values.featured,
+    order: Number(values.order) || 0,
+    githubUrl: values.githubUrl.trim() || null,
+    liveUrl: values.liveUrl.trim() || null,
+    coverImage: values.coverImage,
+    accentColor: values.accentColor,
+    technologies: values.technologies.filter(Boolean),
+  };
+}
+
 export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const formRef = useRef<HTMLFormElement>(null);
 
   const [values, setValues] = useState<FormValues>(EMPTY);
   const [slugTouched, setSlugTouched] = useState(mode === 'edit');
-  const [errors, setErrors] = useState<Partial<Record<keyof FormValues, string>>>({});
+  const [errors, setErrors] = useState<FormErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [submitCount, setSubmitCount] = useState(0);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const { dirty, saved, markSaved } = useUnsavedChanges(values);
 
   const existing = useQuery({
     queryKey: ['admin', 'project', id],
@@ -80,35 +168,22 @@ export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) 
     enabled: mode === 'edit' && Boolean(id),
   });
 
+  // Seed the form once. Saving updates it from the response, so a later
+  // refetch can't clobber edits typed after the save.
+  const seeded = useRef(false);
   useEffect(() => {
-    if (!existing.data) return;
-    const project = existing.data;
-    setValues({
-      title: project.title,
-      slug: project.slug,
-      category: project.category,
-      summary: project.summary,
-      description: project.description,
-      content: project.content ?? '',
-      problem: project.problem ?? '',
-      solution: project.solution ?? '',
-      features: project.features ?? [],
-      architecture: project.architecture ?? '',
-      challenges: project.challenges ?? '',
-      implementation: project.implementation ?? '',
-      results: project.results ?? '',
-      role: project.role ?? '',
-      year: project.year ? String(project.year) : '',
-      status: project.status,
-      featured: project.featured,
-      order: String(project.order),
-      githubUrl: project.githubUrl ?? '',
-      liveUrl: project.liveUrl ?? '',
-      coverImage: project.coverImage,
-      accentColor: project.accentColor ?? '#A855F7',
-      technologies: project.technologies.map((technology) => technology.name),
-    });
-  }, [existing.data]);
+    if (!existing.data || seeded.current) return;
+    seeded.current = true;
+    const next = toForm(existing.data);
+    setValues(next);
+    markSaved(next);
+  }, [existing.data, markSaved]);
+
+  // After a failed submit, take the user straight to the first problem.
+  useEffect(() => {
+    if (submitCount === 0) return;
+    formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [submitCount]);
 
   const set = <K extends keyof FormValues>(key: K, value: FormValues[K]) => {
     setValues((current) => ({ ...current, [key]: value }));
@@ -121,7 +196,7 @@ export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) 
       title,
       slug: slugTouched ? current.slug : slugify(title),
     }));
-    setErrors((current) => ({ ...current, title: undefined }));
+    setErrors((current) => ({ ...current, title: undefined, slug: undefined }));
   };
 
   const categoryOptions = useMemo(() => {
@@ -134,112 +209,88 @@ export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) 
       mode === 'edit'
         ? adminApi.updateProject(id as string, payload)
         : adminApi.createProject(payload),
-    onSuccess: () => {
+    onSuccess: (project) => {
       void queryClient.invalidateQueries({ queryKey: ['admin'] });
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
-      navigate('/admin/projects');
+      if (mode === 'edit') {
+        const next = toForm(project);
+        setValues(next);
+        markSaved(next);
+        toast({ title: 'Changes saved' });
+      } else {
+        markSaved(values);
+        toast({ title: `Created “${project.title}”` });
+        navigate('/admin/projects');
+      }
     },
     onError: (error) =>
-      setFormError(error instanceof ApiError ? error.message : 'Could not save the project.'),
+      setFormError(error instanceof ApiError ? error.message : 'Couldn’t save the project.'),
   });
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError(null);
-
-    const nextErrors: Partial<Record<keyof FormValues, string>> = {};
-    if (!values.title.trim()) nextErrors.title = 'A title is required.';
-    if (!values.slug.trim()) nextErrors.slug = 'A slug is required.';
-    if (!values.category.trim()) nextErrors.category = 'Pick a category.';
-    if (!values.summary.trim()) nextErrors.summary = 'A short summary is required.';
-    if (!values.description.trim()) nextErrors.description = 'A description is required.';
-    if (values.githubUrl && !/^https?:\/\//.test(values.githubUrl))
-      nextErrors.githubUrl = 'Must start with http:// or https://';
-    if (values.liveUrl && !/^https?:\/\//.test(values.liveUrl))
-      nextErrors.liveUrl = 'Must start with http:// or https://';
-
+    const nextErrors = validate(values);
     setErrors(nextErrors);
-    if (Object.keys(nextErrors).length > 0) return;
-
-    save.mutate({
-      title: values.title.trim(),
-      slug: slugify(values.slug),
-      category: values.category.trim(),
-      summary: values.summary.trim(),
-      description: values.description.trim(),
-      content: values.content.trim() || null,
-      problem: values.problem.trim() || null,
-      solution: values.solution.trim() || null,
-      features: values.features.filter(Boolean),
-      architecture: values.architecture.trim() || null,
-      challenges: values.challenges.trim() || null,
-      implementation: values.implementation.trim() || null,
-      results: values.results.trim() || null,
-      role: values.role.trim() || null,
-      year: values.year ? Number(values.year) : null,
-      status: values.status,
-      featured: values.featured,
-      order: Number(values.order) || 0,
-      githubUrl: values.githubUrl.trim() || null,
-      liveUrl: values.liveUrl.trim() || null,
-      coverImage: values.coverImage,
-      accentColor: values.accentColor,
-      technologies: values.technologies.filter(Boolean),
-    });
+    if (Object.keys(nextErrors).length > 0) {
+      setSubmitCount((count) => count + 1);
+      return;
+    }
+    save.mutate(toPayload(values));
   };
 
-  if (mode === 'edit' && existing.isLoading) return <LoadingState label="Loading project" />;
+  const leave = () => (dirty ? setConfirmLeave(true) : navigate('/admin/projects'));
+
+  if (mode === 'edit' && existing.isLoading) return <PageSkeleton />;
 
   if (mode === 'edit' && existing.isError) {
     return (
-      <ErrorState
-        title="Project not found"
-        description="It may have been deleted. Return to the list and try again."
-        onRetry={() => navigate('/admin/projects')}
-      />
+      <Panel>
+        <ErrorState
+          title="Project not found"
+          description="It may have been deleted. Return to the list and try again."
+          onRetry={() => navigate('/admin/projects')}
+        />
+      </Panel>
     );
   }
 
+  const title = mode === 'create' ? 'New project' : saved.title || 'Edit project';
+
   return (
-    <form onSubmit={onSubmit} className="space-y-6">
-      <AdminPageHeader
-        title={mode === 'create' ? 'New project' : `Edit ${values.title || 'project'}`}
+    <form ref={formRef} id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
+      <PageHeader
+        eyebrow={
+          <button
+            type="button"
+            onClick={leave}
+            className="-ml-1 inline-flex items-center gap-0.5 text-sys-accent transition-opacity hover:opacity-75"
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+            Projects
+          </button>
+        }
+        title={title}
         description="Everything here is content-managed — no code changes required to update the site."
         actions={
           <>
-            <Button
-              to="/admin/projects"
-              variant="ghost"
-              size="sm"
-              type="button"
-              iconLeft={<ArrowLeft className="h-3.5 w-3.5" />}
-            >
-              Back
-            </Button>
+            {mode === 'edit' && <ProjectStatusBadge status={saved.status} />}
             <Button
               type="submit"
               size="sm"
               loading={save.isPending}
-              iconLeft={<Save className="h-3.5 w-3.5" />}
+              disabled={mode === 'edit' && !dirty}
             >
-              {mode === 'create' ? 'Create project' : 'Save changes'}
+              {mode === 'create' ? 'Create project' : 'Save'}
             </Button>
           </>
         }
       />
 
-      {formError && (
-        <div
-          role="alert"
-          className="flex items-start gap-2.5 rounded-2xl border border-rose-400/30 bg-rose-500/[0.08] px-4 py-3 text-sm text-rose-200"
-        >
-          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{formError}</span>
-        </div>
-      )}
+      {formError && <InlineAlert>{formError}</InlineAlert>}
 
-      <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
-        <div className="space-y-6">
+      <div className="grid gap-5 xl:grid-cols-[1.5fr_1fr]">
+        <div className="min-w-0 space-y-5">
           <Panel title="Basics">
             <div className="space-y-5">
               <div className="grid gap-5 sm:grid-cols-2">
@@ -283,6 +334,7 @@ export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) 
                 <Input
                   label="Year"
                   type="number"
+                  inputMode="numeric"
                   min={2000}
                   max={2100}
                   value={values.year}
@@ -312,14 +364,14 @@ export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) 
             </div>
           </Panel>
 
-          <Panel title="Case study" description="Only sections you fill in are rendered.">
+          <Panel title="Case study" description="Only the sections you fill in are shown.">
             <div className="space-y-5">
               <Textarea
-                label="Content"
+                label="Introduction"
                 rows={3}
                 value={values.content}
                 onChange={(event) => set('content', event.target.value)}
-                hint="Optional introduction"
+                hint="Optional"
               />
               <Textarea
                 label="Problem"
@@ -333,7 +385,7 @@ export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) 
                 value={values.solution}
                 onChange={(event) => set('solution', event.target.value)}
               />
-              <StringListInput
+              <LinesInput
                 label="Features"
                 value={values.features}
                 onChange={(next) => set('features', next)}
@@ -363,15 +415,15 @@ export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) 
                 rows={2}
                 value={values.results}
                 onChange={(event) => set('results', event.target.value)}
-                hint="Leave empty or write “N/A — no metrics published”. Never invent numbers."
+                hint="Leave empty or write “N/A”. Never invent numbers."
               />
             </div>
           </Panel>
         </div>
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-5">
           <Panel title="Publishing">
-            <div className="space-y-5">
+            <div className="space-y-4">
               <Select
                 label="Status"
                 value={values.status}
@@ -382,17 +434,16 @@ export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) 
                   { value: 'ARCHIVED', label: 'Archived — hidden, kept' },
                 ]}
               />
-
               <Switch
                 checked={values.featured}
                 onChange={(checked) => set('featured', checked)}
                 label="Featured"
                 description="Show on the home page and in the featured grid."
               />
-
               <Input
                 label="Order"
                 type="number"
+                inputMode="numeric"
                 value={values.order}
                 onChange={(event) => set('order', event.target.value)}
                 hint="Lower numbers appear first"
@@ -408,50 +459,28 @@ export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) 
                 onChange={(url) => set('coverImage', url)}
                 folder="projects"
               />
-
-              <div className="space-y-2">
-                <label
-                  htmlFor="accentColor"
-                  className="text-xs font-medium uppercase tracking-[0.16em] text-haze-300"
-                >
-                  Accent colour
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    id="accentColor"
-                    type="color"
-                    value={values.accentColor}
-                    onChange={(event) => set('accentColor', event.target.value)}
-                    className="h-10 w-14 cursor-pointer rounded-xl border border-white/10 bg-ink-800"
-                  />
-                  <Input
-                    label=""
-                    value={values.accentColor}
-                    onChange={(event) => set('accentColor', event.target.value)}
-                    containerClassName="flex-1"
-                  />
-                </div>
-                <p className="text-2xs text-haze-400">
-                  Drives the card glow, spotlight and placeholder artwork.
-                </p>
-              </div>
+              <ColorField
+                label="Accent colour"
+                value={values.accentColor}
+                onChange={(color) => set('accentColor', color)}
+                hint="Drives the card glow, spotlight and placeholder artwork."
+              />
             </div>
           </Panel>
 
           <Panel title="Stack & links">
             <div className="space-y-5">
-              <StringListInput
+              <TagInput
                 label="Technologies"
-                multiline={false}
                 value={values.technologies}
                 onChange={(next) => set('technologies', next)}
-                placeholder="React"
-                hint="Press Enter to add. Unknown names are created automatically."
+                placeholder="React, TypeScript…"
+                hint="Press Enter or comma to add. New names are created automatically."
               />
-
               <Input
                 label="GitHub URL"
                 type="url"
+                inputMode="url"
                 value={values.githubUrl}
                 onChange={(event) => set('githubUrl', event.target.value)}
                 error={errors.githubUrl}
@@ -460,6 +489,7 @@ export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) 
               <Input
                 label="Live URL"
                 type="url"
+                inputMode="url"
                 value={values.liveUrl}
                 onChange={(event) => set('liveUrl', event.target.value)}
                 error={errors.liveUrl}
@@ -467,17 +497,32 @@ export default function AdminProjectForm({ mode }: { mode: 'create' | 'edit' }) 
               />
             </div>
           </Panel>
-
-          {mode === 'edit' && (
-            <p className="px-1 text-2xs text-haze-400">
-              Gallery images and ordering can be managed from the public project page once uploaded.{' '}
-              <Link to="/admin/projects" className="text-haze-300 underline">
-                Back to list
-              </Link>
-            </p>
-          )}
         </div>
       </div>
+
+      <SaveBar
+        formId={FORM_ID}
+        dirty={dirty}
+        saving={save.isPending}
+        onDiscard={() => {
+          setValues(saved);
+          setErrors({});
+        }}
+        saveLabel={mode === 'create' ? 'Create' : 'Save'}
+      />
+
+      <ConfirmDialog
+        open={confirmLeave}
+        title="Discard unsaved changes?"
+        description="Your edits to this project haven’t been saved."
+        confirmLabel="Discard"
+        onCancel={() => setConfirmLeave(false)}
+        onConfirm={() => {
+          setConfirmLeave(false);
+          markSaved(values);
+          navigate('/admin/projects');
+        }}
+      />
     </form>
   );
 }

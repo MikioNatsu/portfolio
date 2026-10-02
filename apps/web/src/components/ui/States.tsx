@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { TriangleAlert, Inbox, LoaderCircle, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from './Button';
+import { useSkin } from './skin';
 
 /** Inline spinner block. */
 export function LoadingState({
@@ -11,6 +12,21 @@ export function LoadingState({
   label?: string;
   className?: string;
 }) {
+  const skin = useSkin();
+
+  if (skin === 'system') {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className={cn('flex flex-col items-center justify-center gap-3 py-16', className)}
+      >
+        <LoaderCircle className="h-5 w-5 animate-spin text-sys-secondary" aria-hidden="true" />
+        <p className="text-[13px] text-sys-secondary">{label}</p>
+      </div>
+    );
+  }
+
   return (
     <div
       role="status"
@@ -54,6 +70,31 @@ export function SkeletonGrid({ count = 4, className }: { count?: number; classNa
   );
 }
 
+const MESSAGE_SKINS = {
+  cinematic: {
+    title: 'font-display text-lg text-haze-100',
+    description: 'max-w-sm text-sm text-haze-400',
+    empty:
+      'flex flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-16 text-center',
+    emptyIcon:
+      'flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-accent-fuchsia',
+    error:
+      'flex flex-col items-center justify-center gap-4 rounded-3xl border border-rose-400/20 bg-rose-500/[0.05] px-6 py-14 text-center',
+    errorIcon:
+      'flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-400/30 bg-rose-500/10 text-rose-200',
+  },
+  system: {
+    title: 'text-[15px] font-semibold text-sys-label',
+    description: 'max-w-sm text-[13px] leading-5 text-sys-secondary',
+    empty: 'flex flex-col items-center justify-center gap-3 px-6 py-14 text-center',
+    emptyIcon:
+      'flex h-12 w-12 items-center justify-center rounded-full bg-sys-fill-4 text-sys-secondary',
+    error: 'flex flex-col items-center justify-center gap-3 px-6 py-14 text-center',
+    errorIcon:
+      'flex h-12 w-12 items-center justify-center rounded-full bg-sys-red/[0.12] text-sys-red-ink',
+  },
+} as const;
+
 export function EmptyState({
   title,
   description,
@@ -67,19 +108,14 @@ export function EmptyState({
   action?: ReactNode;
   className?: string;
 }) {
+  const classes = MESSAGE_SKINS[useSkin()];
+
   return (
-    <div
-      className={cn(
-        'flex flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-16 text-center',
-        className,
-      )}
-    >
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-accent-fuchsia">
-        {icon ?? <Inbox className="h-5 w-5" />}
-      </div>
+    <div className={cn(classes.empty, className)}>
+      <div className={classes.emptyIcon}>{icon ?? <Inbox className="h-5 w-5" />}</div>
       <div className="space-y-1.5">
-        <h3 className="font-display text-lg text-haze-100">{title}</h3>
-        {description && <p className="max-w-sm text-sm text-haze-400">{description}</p>}
+        <h3 className={classes.title}>{title}</h3>
+        {description && <p className={classes.description}>{description}</p>}
       </div>
       {action}
     </div>
@@ -97,20 +133,16 @@ export function ErrorState({
   onRetry?: () => void;
   className?: string;
 }) {
+  const classes = MESSAGE_SKINS[useSkin()];
+
   return (
-    <div
-      role="alert"
-      className={cn(
-        'flex flex-col items-center justify-center gap-4 rounded-3xl border border-rose-400/20 bg-rose-500/[0.05] px-6 py-14 text-center',
-        className,
-      )}
-    >
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-400/30 bg-rose-500/10 text-rose-200">
+    <div role="alert" className={cn(classes.error, className)}>
+      <div className={classes.errorIcon}>
         <TriangleAlert className="h-5 w-5" />
       </div>
       <div className="space-y-1.5">
-        <h3 className="font-display text-lg text-haze-100">{title}</h3>
-        {description && <p className="max-w-sm text-sm text-haze-400">{description}</p>}
+        <h3 className={classes.title}>{title}</h3>
+        {description && <p className={classes.description}>{description}</p>}
       </div>
       {onRetry && (
         <Button

@@ -1,16 +1,27 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import type { Skill } from '@natsu/types';
 import { adminApi, ApiError } from '@/api/client';
-import { SKILL_CATEGORIES } from '@/lib/constants';
-import { slugify } from '@/lib/utils';
-import { AdminModal, AdminPageHeader, ConfirmDialog, Panel } from '@/components/admin/AdminUI';
+import { InlineAlert, Panel } from '@/components/admin/Card';
+import { ColorField } from '@/components/admin/Fields';
+import { GlyphTile } from '@/components/admin/GlyphTile';
+import { IconButton } from '@/components/admin/IconButton';
+import { PageHeader } from '@/components/admin/PageHeader';
+import { ConfirmDialog, Sheet } from '@/components/admin/Sheet';
+import { ListSkeleton } from '@/components/admin/Skeleton';
+import { SortableList } from '@/components/admin/SortableList';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Switch, Textarea } from '@/components/ui/Field';
-import { Badge } from '@/components/ui/Badge';
-import { TechGlyph } from '@/components/ui/Icon';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
+import { EmptyState, ErrorState } from '@/components/ui/States';
+import { useCreateIntent } from '@/hooks/useCreateIntent';
+import { useReorderableList } from '@/hooks/useReorderableList';
+import { useToast } from '@/hooks/useToast';
+import { QUERY_KEYS, SKILL_CATEGORIES } from '@/lib/constants';
+import { isHexColor, slugify } from '@/lib/utils';
+
+const FORM_ID = 'skill-form';
 
 interface FormValues {
   name: string;
@@ -34,90 +45,115 @@ const EMPTY: FormValues = {
   published: true,
 };
 
+function toForm(skill: Skill): FormValues {
+  return {
+    name: skill.name,
+    slug: skill.slug,
+    category: skill.category,
+    icon: skill.icon ?? '',
+    color: skill.color ?? '#A855F7',
+    level: skill.level ? String(skill.level) : '',
+    description: skill.description ?? '',
+    published: skill.published,
+  };
+}
+
+const errorMessage = (error: unknown, fallback: string) =>
+  error instanceof ApiError ? error.message : fallback;
+
 export default function AdminSkills() {
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const { toast } = useToast();
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<Skill | null>(null);
   const [values, setValues] = useState<FormValues>(EMPTY);
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Skill | null>(null);
 
-  const list = useQuery({ queryKey: ['admin', 'skills'], queryFn: () => adminApi.listSkills() });
+  const list = useQuery({ queryKey: QUERY_KEYS.adminSkills, queryFn: () => adminApi.listSkills() });
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['admin'] });
     void queryClient.invalidateQueries({ queryKey: ['skills'] });
   };
 
+  const { ordered, setOrdered, commit } = useReorderableList({
+    queryKey: QUERY_KEYS.adminSkills,
+    items: list.data,
+    persist: (ids) => adminApi.reorderSkills(ids),
+    onError: (caught) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t save the new order',
+        description: errorMessage(caught, 'The previous order was restored.'),
+      }),
+    onSettled: invalidate,
+  });
+
   const save = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       editing ? adminApi.updateSkill(editing.id, payload) : adminApi.createSkill(payload),
-    onSuccess: () => {
+    onSuccess: (skill) => {
+      toast({ title: editing ? 'Skill updated' : `Added “${skill.name}”` });
       invalidate();
-      close();
+      closeSheet();
     },
-    onError: (caught) => setError(caught instanceof ApiError ? caught.message : 'Could not save.'),
+    onError: (caught) => setError(errorMessage(caught, 'Couldn’t save this skill.')),
   });
 
   const remove = useMutation({
-    mutationFn: (id: string) => adminApi.deleteSkill(id),
-    onSuccess: () => {
+    mutationFn: (skill: Skill) => adminApi.deleteSkill(skill.id),
+    onSuccess: (_result, skill) => {
       setPendingDelete(null);
+      toast({ title: `Deleted “${skill.name}”` });
       invalidate();
     },
+    onError: (caught) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t delete skill',
+        description: errorMessage(caught, 'Please try again.'),
+      }),
   });
 
-  const reorder = useMutation({
-    mutationFn: (ids: string[]) => adminApi.reorderSkills(ids),
-    onSuccess: invalidate,
-  });
-
-  const close = () => {
-    setOpen(false);
-    setEditing(null);
-    setValues(EMPTY);
+  const closeSheet = () => {
+    setSheetOpen(false);
     setError(null);
   };
 
   const openCreate = () => {
     setValues(EMPTY);
     setEditing(null);
-    setOpen(true);
+    setError(null);
+    setSheetOpen(true);
   };
 
   const openEdit = (skill: Skill) => {
-    setValues({
-      name: skill.name,
-      slug: skill.slug,
-      category: skill.category,
-      icon: skill.icon ?? '',
-      color: skill.color ?? '#A855F7',
-      level: skill.level ? String(skill.level) : '',
-      description: skill.description ?? '',
-      published: skill.published,
-    });
+    setValues(toForm(skill));
     setEditing(skill);
-    setOpen(true);
+    setError(null);
+    setSheetOpen(true);
   };
 
-  const move = (index: number, direction: -1 | 1) => {
-    if (!list.data) return;
-    const next = [...list.data];
-    const target = index + direction;
-    if (target < 0 || target >= next.length) return;
-    const current = next[index];
-    const swap = next[target];
-    if (!current || !swap) return;
-    next[index] = swap;
-    next[target] = current;
-    reorder.mutate(next.map((item) => item.id));
-  };
+  useCreateIntent(openCreate);
+
+  const update = <K extends keyof FormValues>(key: K, value: FormValues[K]) =>
+    setValues((current) => ({ ...current, [key]: value }));
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     if (!values.name.trim()) {
       setError('A name is required.');
+      return;
+    }
+    if (!isHexColor(values.color)) {
+      setError('Use a six-digit hex colour, e.g. #A855F7.');
+      return;
+    }
+    const level = values.level ? Number(values.level) : null;
+    if (level !== null && (Number.isNaN(level) || level < 0 || level > 100)) {
+      setError('Level must be between 0 and 100.');
       return;
     }
 
@@ -127,7 +163,7 @@ export default function AdminSkills() {
       category: values.category,
       icon: values.icon.trim() || null,
       color: values.color,
-      level: values.level ? Number(values.level) : null,
+      level,
       description: values.description.trim() || null,
       published: values.published,
     });
@@ -135,118 +171,120 @@ export default function AdminSkills() {
 
   return (
     <div className="space-y-6">
-      <AdminPageHeader
+      <PageHeader
         title="Skills"
-        description="The futuristic cards in the skills grid. Order controls display sequence."
+        description="Cards in the public skills grid. Drag to set the display order."
         actions={
-          <Button size="sm" onClick={openCreate} iconLeft={<Plus className="h-3.5 w-3.5" />}>
+          <Button size="sm" onClick={openCreate} iconLeft={<Plus className="h-4 w-4" />}>
             New skill
           </Button>
         }
       />
 
-      <Panel className="p-0">
+      <Panel padded={false}>
         {list.isLoading ? (
-          <LoadingState label="Loading skills" />
-        ) : list.isError || !list.data ? (
-          <ErrorState title="Could not load skills" onRetry={() => list.refetch()} />
-        ) : list.data.length === 0 ? (
-          <EmptyState title="No skills yet" description="Add the technologies you work with." />
+          <ListSkeleton rows={6} />
+        ) : list.isError ? (
+          <ErrorState title="Couldn’t load skills" onRetry={() => list.refetch()} />
+        ) : ordered.length === 0 ? (
+          <EmptyState
+            title="No skills yet"
+            description="Add the technologies you work with."
+            icon={<Sparkles className="h-5 w-5" />}
+            action={
+              <Button size="sm" onClick={openCreate}>
+                Add skill
+              </Button>
+            }
+          />
         ) : (
-          <ul className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-3">
-            {list.data.map((skill, index) => (
-              <li
-                key={skill.id}
-                className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3.5"
-              >
-                <TechGlyph name={skill.name} slug={skill.slug} color={skill.color} size={34} />
-
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-haze-100">{skill.name}</p>
-                  <p className="truncate text-2xs uppercase tracking-[0.14em] text-haze-400">
-                    {skill.category}
-                  </p>
+          <SortableList
+            items={ordered}
+            getKey={(skill) => skill.id}
+            getLabel={(skill) => skill.name}
+            onChange={setOrdered}
+            onCommit={commit}
+            itemClassName="after:absolute after:bottom-0 after:left-[5.25rem] after:right-0 after:h-px after:bg-sys-separator last:after:hidden"
+            renderItem={(skill, handle) => (
+              <div className="flex items-center gap-2 py-2.5 pl-3 pr-3 sm:pr-4">
+                {handle}
+                <GlyphTile name={skill.name} slug={skill.slug} color={skill.color} size={38} />
+                <div className="ml-1 min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-sys-label">{skill.name}</p>
+                  <p className="truncate text-[12px] text-sys-secondary">{skill.category}</p>
                 </div>
-
                 {!skill.published && <Badge tone="warning">Hidden</Badge>}
-
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label="Move up"
-                    disabled={index === 0}
-                    onClick={() => move(index, -1)}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-haze-400 hover:text-white disabled:opacity-30"
-                  >
-                    <ArrowUp className="h-3 w-3" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Move down"
-                    disabled={index === list.data!.length - 1}
-                    onClick={() => move(index, 1)}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-haze-400 hover:text-white disabled:opacity-30"
-                  >
-                    <ArrowDown className="h-3 w-3" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Edit ${skill.name}`}
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <IconButton
+                    label={`Edit ${skill.name}`}
+                    icon={Pencil}
                     onClick={() => openEdit(skill)}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-haze-400 hover:border-accent-violet/40 hover:text-white"
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Delete ${skill.name}`}
+                  />
+                  <IconButton
+                    label={`Delete ${skill.name}`}
+                    icon={Trash2}
+                    tone="danger"
                     onClick={() => setPendingDelete(skill)}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-haze-400 hover:border-rose-400/50 hover:text-rose-200"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  />
                 </div>
-              </li>
-            ))}
-          </ul>
+              </div>
+            )}
+          />
         )}
       </Panel>
 
-      <AdminModal
-        open={open}
-        onClose={close}
+      <Sheet
+        open={sheetOpen}
+        onClose={closeSheet}
         title={editing ? `Edit ${editing.name}` : 'New skill'}
         footer={
           <>
-            <Button variant="ghost" size="sm" type="button" onClick={close}>
+            <Button variant="ghost" size="sm" type="button" onClick={closeSheet}>
               Cancel
             </Button>
-            <Button size="sm" type="submit" form="skill-form" loading={save.isPending}>
-              {editing ? 'Save changes' : 'Create skill'}
+            <Button size="sm" type="submit" form={FORM_ID} loading={save.isPending}>
+              {editing ? 'Save' : 'Add skill'}
             </Button>
           </>
         }
       >
-        <form id="skill-form" onSubmit={onSubmit} className="space-y-5">
+        <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-5">
+          {error && <InlineAlert>{error}</InlineAlert>}
+
+          <div className="flex items-center gap-4 rounded-xl bg-sys-fill-4 p-3.5">
+            <GlyphTile
+              name={values.name || '?'}
+              slug={values.slug || slugify(values.name)}
+              color={isHexColor(values.color) ? values.color : null}
+              size={48}
+            />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-sys-label">
+                {values.name || 'Skill name'}
+              </p>
+              <p className="text-[12px] text-sys-secondary">Live preview of the generated glyph</p>
+            </div>
+          </div>
+
           <div className="grid gap-5 sm:grid-cols-2">
             <Input
               label="Name"
               required
               value={values.name}
               onChange={(event) =>
-                setValues({
-                  ...values,
+                setValues((current) => ({
+                  ...current,
                   name: event.target.value,
-                  slug: editing ? values.slug : slugify(event.target.value),
-                })
+                  slug: editing ? current.slug : slugify(event.target.value),
+                }))
               }
               placeholder="React"
             />
             <Input
               label="Slug"
               value={values.slug}
-              onChange={(event) => setValues({ ...values, slug: event.target.value })}
-              hint="Used for the generated icon shape"
+              onChange={(event) => update('slug', event.target.value)}
+              hint="Picks the glyph shape"
             />
           </div>
 
@@ -254,17 +292,18 @@ export default function AdminSkills() {
             <Select
               label="Category"
               value={values.category}
-              onChange={(event) => setValues({ ...values, category: event.target.value })}
+              onChange={(event) => update('category', event.target.value)}
               options={SKILL_CATEGORIES.map((category) => ({ value: category, label: category }))}
             />
             <Input
-              label="Level (optional)"
+              label="Level"
               type="number"
+              inputMode="numeric"
               min={0}
               max={100}
               value={values.level}
-              onChange={(event) => setValues({ ...values, level: event.target.value })}
-              hint="Left empty by default — no progress bars are shown"
+              onChange={(event) => update('level', event.target.value)}
+              hint="Optional · not shown publicly"
             />
           </div>
 
@@ -272,61 +311,38 @@ export default function AdminSkills() {
             <Input
               label="Icon name"
               value={values.icon}
-              onChange={(event) => setValues({ ...values, icon: event.target.value })}
-              hint="e.g. react, typescript, git"
+              onChange={(event) => update('icon', event.target.value)}
+              hint="e.g. react, git"
             />
-            <div className="space-y-2">
-              <label
-                htmlFor="skill-color"
-                className="text-xs font-medium uppercase tracking-[0.16em] text-haze-300"
-              >
-                Colour
-              </label>
-              <div className="flex items-center gap-3">
-                <input
-                  id="skill-color"
-                  type="color"
-                  value={values.color}
-                  onChange={(event) => setValues({ ...values, color: event.target.value })}
-                  className="h-11 w-14 cursor-pointer rounded-xl border border-white/10 bg-ink-800"
-                />
-                <Input
-                  label=""
-                  value={values.color}
-                  onChange={(event) => setValues({ ...values, color: event.target.value })}
-                  containerClassName="flex-1"
-                />
-              </div>
-            </div>
+            <ColorField
+              label="Colour"
+              value={values.color}
+              onChange={(color) => update('color', color)}
+            />
           </div>
 
           <Textarea
             label="Description"
             rows={2}
             value={values.description}
-            onChange={(event) => setValues({ ...values, description: event.target.value })}
+            onChange={(event) => update('description', event.target.value)}
           />
 
           <Switch
             checked={values.published}
-            onChange={(checked) => setValues({ ...values, published: checked })}
+            onChange={(checked) => update('published', checked)}
             label="Published"
+            description="Hidden skills never reach the public site."
           />
-
-          {error && (
-            <p role="alert" className="text-sm text-rose-300">
-              {error}
-            </p>
-          )}
         </form>
-      </AdminModal>
+      </Sheet>
 
       <ConfirmDialog
         open={Boolean(pendingDelete)}
-        title={`Delete ${pendingDelete?.name ?? 'skill'}?`}
+        title={`Delete “${pendingDelete?.name ?? 'skill'}”?`}
         loading={remove.isPending}
         onCancel={() => setPendingDelete(null)}
-        onConfirm={() => pendingDelete && remove.mutate(pendingDelete.id)}
+        onConfirm={() => pendingDelete && remove.mutate(pendingDelete)}
       />
     </div>
   );

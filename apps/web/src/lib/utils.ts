@@ -39,6 +39,18 @@ export function formatDate(value?: string | Date | null): string {
   }).format(date);
 }
 
+/** "2025-03-12" or ISO → "12 Mar" (calendar dates are read as UTC days). */
+export function formatDay(value?: string | null): string {
+  if (!value) return '';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00Z`) : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
 /** ISO → "3h ago" / "2d ago" (falls back to an absolute date past a week). */
 export function formatRelative(value?: string | Date | null): string {
   if (!value) return '';
@@ -122,6 +134,12 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+/** Apple platforms label shortcuts with ⌘; everyone else uses Ctrl. */
+export function isApplePlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
+}
+
 export function isTouchDevice(): boolean {
   if (typeof window === 'undefined') return false;
   return !window.matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -141,6 +159,36 @@ export function safeReferrer(): string | null {
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+/** `#A855F7`-style six-digit hex colour. */
+export function isHexColor(value: string): boolean {
+  return /^#[0-9a-f]{6}$/i.test(value);
+}
+
+/** Multiline text → trimmed, non-empty entries (one per line). */
+export function parseLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/** "React, Vite ,  TS" → ["React", "Vite", "TS"] */
+export function splitTokens(text: string): string[] {
+  return text
+    .split(',')
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+/** Returns a copy of `items` with the element at `from` moved to `to`. */
+export function moveItem<T>(items: readonly T[], from: number, to: number): T[] {
+  const next = [...items];
+  if (from < 0 || from >= next.length || to < 0 || to >= next.length) return next;
+  const [moved] = next.splice(from, 1);
+  if (moved !== undefined) next.splice(to, 0, moved);
+  return next;
 }
 
 export function range(count: number): number[] {

@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AuthUser } from '@natsu/types';
 import { useNavigate } from 'react-router-dom';
@@ -40,16 +41,23 @@ export function useAuth() {
   return { user, isAuthenticated, isLoading, login, logout, refetch: session.refetch };
 }
 
-/** Convenience hook for the logout button in the admin shell. */
+/**
+ * Signs out and returns to the login screen. The local session is cleared even
+ * if the API call fails (e.g. the server is unreachable).
+ */
 export function useLogout() {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const {
+    logout: { mutateAsync },
+  } = useAuth();
 
-  return async () => {
+  return useCallback(async () => {
     try {
-      await logout.mutateAsync();
+      await mutateAsync();
+    } catch {
+      // Nothing to do: `onSettled` has already cleared the local session.
     } finally {
       navigate('/admin/login', { replace: true });
     }
-  };
+  }, [mutateAsync, navigate]);
 }
