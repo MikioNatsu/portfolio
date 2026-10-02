@@ -1,0 +1,17 @@
+{
+  "name": "Natsu — Frontend Developer & Anime Creator",
+  "short_name": "Natsu",
+  "description": "Portfolio of Natsu — frontend developer and anime creator building modern web experiences.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070711",
+  "theme_color": "#070711",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

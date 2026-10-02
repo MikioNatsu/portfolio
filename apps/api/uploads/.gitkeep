@@ -1,0 +1,2 @@
+# Local disk upload target (used when CLOUDINARY_* is not configured).
+# Files written here are intentionally ignored by git.

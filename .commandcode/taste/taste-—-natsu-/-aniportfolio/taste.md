@@ -1,0 +1,16 @@
+# Taste — Natsu / aniportfolio
+- Never fabricate content or data — no invented clients, awards, company names, testimonials, statistics or performance metrics. Omit the field, label it "N/A", or leave a clearly-marked placeholder instead, and say which values need filling in. Confidence: 0.9
+- Content should be CMS/database-driven and editable from an admin surface, not hardcoded inside UI components. Confidence: 0.8
+- Build real, functional implementations rather than static mockups or screenshot embeds; a reference image is a design source, not a content source to copy verbatim. Confidence: 0.75
+- Expects the full verification chain to be run and all errors fixed before work is called finished: install, lint, typecheck, test, build (plus migrations/seed on the backend). Explicitly requires no console errors, no TypeScript errors, no broken links/images, no layout overflow, no missing routes. Confidence: 0.85
+- Expects visual QA sweeps at a specific set of viewport widths (1440 / 1280 / 1024 / 768 / 390 / 375 / 320 px) covering every major page and section. Confidence: 0.65
+- Wants production-quality code: TypeScript strict mode, small reusable components, no duplicated logic, no giant components or single-file apps, clear naming, proper types, and comments only where they genuinely help. Confidence: 0.85
+- Prefers a clean, scalable monorepo layout — apps under `apps/`, shared packages under `packages/`, infrastructure files at the root. Confidence: 0.65
+- Preferred stack for full-stack web work: React + TypeScript + Vite + Tailwind CSS + Framer Motion + TanStack Query with React Router on the frontend; NestJS + PostgreSQL + Prisma + JWT (Passport, class-validator, Swagger) on the backend; Docker/Docker Compose for infrastructure; Vitest + React Testing Library + Supertest for tests; ESLint + Prettier for linting and formatting. Confidence: 0.7
+- Cares about performance: optimized images (WebP/AVIF), lazy loading, code splitting, caching, and avoiding unnecessary/bulky dependencies. Confidence: 0.7
+- Never expose secrets or credentials (DATABASE_URL, JWT_SECRET, API keys, storage and email credentials); ship a `.env.example` and keep the real `.env` out of version control. Confidence: 0.85
+- Expects defence in depth on public endpoints: input validation/DTOs, hashed passwords, JWT expiry, CORS allow-listing, security headers, and rate limiting on contact/login/analytics. Confidence: 0.75
+- Wants semantic HTML, keyboard-accessible controls, alt text, form labels, visible focus states, and `prefers-reduced-motion` support. Confidence: 0.75
+- Responsive design must recompose the layout per breakpoint rather than shrink the desktop view — no horizontal overflow, clipped text, or undersized tap targets. Confidence: 0.7
+- Media must never autoplay; audio/video playback starts only from an explicit user action. Confidence: 0.7
+- Motion should feel smooth and cinematic and stay restrained — animated subtly, never everything bouncing at once. Confidence: 0.65

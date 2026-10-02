@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "declaration": false,
+    "noEmit": false,
+    // `nest build` deletes outDir on every run; an incremental build info file
+    // would then claim the output is current and skip emitting entirely.
+    "incremental": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test", "**/*.spec.ts", "prisma"]
+}

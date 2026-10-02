@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0D0B1C" />
+      <stop offset="55%" stop-color="#151029" />
+      <stop offset="100%" stop-color="#04040B" />
+    </linearGradient>
+    <radialGradient id="glowA" cx="0.78" cy="0.18" r="0.7">
+      <stop offset="0%" stop-color="#A855F7" stop-opacity="0.55" />
+      <stop offset="100%" stop-color="#A855F7" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glowB" cx="0.12" cy="0.85" r="0.6">
+      <stop offset="0%" stop-color="#EC4899" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#EC4899" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="60%" stop-color="#E9DDFF" />
+      <stop offset="100%" stop-color="#A855F7" />
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F0ABFC" />
+      <stop offset="100%" stop-color="#7C3AED" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#sky)" />
+  <rect width="1200" height="630" fill="url(#glowA)" />
+  <rect width="1200" height="630" fill="url(#glowB)" />
+
+  <g stroke="#A855F7" stroke-opacity="0.09">
+    <path d="M0 90H1200M0 180H1200M0 270H1200M0 360H1200M0 450H1200M0 540H1200" />
+    <path d="M100 0V630M200 0V630M300 0V630M400 0V630M500 0V630M600 0V630M700 0V630M800 0V630M900 0V630M1000 0V630M1100 0V630" />
+  </g>
+
+  <circle cx="960" cy="250" r="190" fill="none" stroke="#A855F7" stroke-opacity="0.25" stroke-width="1.5" stroke-dasharray="5 14" />
+  <circle cx="960" cy="250" r="140" fill="none" stroke="#EC4899" stroke-opacity="0.18" stroke-width="1.5" />
+
+  <path d="M960 90c3 22 15 34 37 37-22 3-34 15-37 37-3-22-15-34-37-37 22-3 34-15 37-37Z" fill="url(#spark)" opacity="0.9" />
+
+  <text x="90" y="150" font-family="Inter, system-ui, sans-serif" font-size="20" letter-spacing="7" fill="#C084FC" fill-opacity="0.85">
+    FRONTEND DEVELOPER · ANIME CREATOR
+  </text>
+
+  <text x="84" y="330" font-family="Georgia, 'Playfair Display', serif" font-size="170" font-weight="700" fill="url(#title)">
+    NATSU
+  </text>
+
+  <rect x="90" y="366" width="150" height="3" rx="1.5" fill="#A855F7" />
+
+  <text x="90" y="440" font-family="Inter, system-ui, sans-serif" font-size="28" fill="#C7BCE7">
+    Modern web experiences inspired by anime.
+  </text>
+  <text x="90" y="486" font-family="Inter, system-ui, sans-serif" font-size="22" fill="#A096C4">
+    Tensei.uz · TenseiiBot · Yuuki Assistant · Kiseki
+  </text>
+
+  <g font-family="Inter, system-ui, sans-serif" font-size="16" letter-spacing="3" fill="#A096C4">
+    <rect x="90" y="530" width="118" height="34" rx="17" fill="#ffffff" fill-opacity="0.05" stroke="#ffffff" stroke-opacity="0.1" />
+    <text x="112" y="552">REACT</text>
+    <rect x="220" y="530" width="150" height="34" rx="17" fill="#ffffff" fill-opacity="0.05" stroke="#ffffff" stroke-opacity="0.1" />
+    <text x="242" y="552">TYPESCRIPT</text>
+    <rect x="382" y="530" width="132" height="34" rx="17" fill="#ffffff" fill-opacity="0.05" stroke="#ffffff" stroke-opacity="0.1" />
+    <text x="404" y="552">TAILWIND</text>
+  </g>
+</svg>

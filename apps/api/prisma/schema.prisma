@@ -1,0 +1,330 @@
+// Natsu Portfolio — Prisma schema
+// PostgreSQL. Images are stored as URLs (Cloudinary / S3 / local disk), never
+// as binary blobs in the database.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  ADMIN
+  EDITOR
+}
+
+enum ProjectStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ImageKind {
+  COVER
+  THUMBNAIL
+  MOBILE
+  DESKTOP
+  GALLERY
+}
+
+enum ContactStatus {
+  NEW
+  READ
+  ARCHIVED
+}
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         UserRole  @default(ADMIN)
+  avatarUrl    String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Profile (singleton — the portfolio owner)
+// ---------------------------------------------------------------------------
+
+model Profile {
+  id                String   @id @default(cuid())
+  slug              String   @unique @default("natsu")
+  name              String
+  role              String
+  headline          String?
+  tagline           String?
+  bio               String   @db.Text
+  longBio           String?  @db.Text
+  avatarUrl         String?
+  heroImageUrl      String?
+  location          String?
+  email             String?
+  availabilityLabel String?
+  availableForWork  Boolean  @default(true)
+  resumeUrl         String?
+  japanesePhrase      String?
+  musicTrackTitle   String?
+  musicTrackArtist  String?
+  musicAudioUrl     String?
+  musicCoverUrl     String?
+  techPills         String[] @default([])
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  stats       ProfileStat[]
+  socialLinks SocialLink[]
+
+  @@map("profiles")
+}
+
+model ProfileStat {
+  id        String  @id @default(cuid())
+  profileId String
+  label     String
+  value     String
+  suffix    String?
+  icon      String?
+  order     Int     @default(0)
+  published Boolean @default(true)
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@map("profile_stats")
+}
+
+model SocialLink {
+  id        String  @id @default(cuid())
+  profileId String?
+  label     String
+  url       String
+  icon      String
+  handle    String?
+  order     Int     @default(0)
+  published Boolean @default(true)
+
+  profile Profile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([profileId])
+  @@map("social_links")
+}
+
+// ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
+
+model Project {
+  id             String        @id @default(cuid())
+  title          String
+  slug           String        @unique
+  category       String
+  summary        String        @db.Text
+  description    String        @db.Text
+  content        String?       @db.Text
+  problem        String?       @db.Text
+  solution       String?       @db.Text
+  features       String[]      @default([])
+  architecture   String?       @db.Text
+  challenges     String?       @db.Text
+  implementation String?       @db.Text
+  results        String?       @db.Text
+  role           String?
+  year           Int?
+  status         ProjectStatus @default(DRAFT)
+  featured       Boolean       @default(false)
+  order          Int           @default(0)
+  githubUrl      String?
+  liveUrl        String?
+  coverImage     String?
+  accentColor    String?
+  publishedAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  images        ProjectImage[]
+  technologies  ProjectTechnology[]
+  experiences   Experience[]
+  analytics     AnalyticsEvent[]
+
+  @@index([status, order])
+  @@index([featured])
+  @@map("projects")
+}
+
+model ProjectImage {
+  id        String    @id @default(cuid())
+  projectId String
+  url       String
+  alt       String?
+  caption   String?
+  kind      ImageKind @default(GALLERY)
+  width     Int?
+  height    Int?
+  order     Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, kind])
+  @@map("project_images")
+}
+
+model Technology {
+  id     String  @id @default(cuid())
+  name   String  @unique
+  slug   String  @unique
+  icon   String?
+  color  String?
+
+  projects   ProjectTechnology[]
+  experiences ExperienceTechnology[]
+
+  @@map("technologies")
+}
+
+model ProjectTechnology {
+  projectId    String
+  technologyId String
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  technology Technology @relation(fields: [technologyId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, technologyId])
+  @@index([technologyId])
+  @@map("project_technologies")
+}
+
+// ---------------------------------------------------------------------------
+// Experience
+// ---------------------------------------------------------------------------
+
+model Experience {
+  id           String   @id @default(cuid())
+  organization String
+  role         String
+  description  String   @db.Text
+  startDate    DateTime
+  endDate      DateTime?
+  current      Boolean  @default(false)
+  location     String?
+  url          String?
+  imageUrl     String?
+  order        Int      @default(0)
+  published    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  technologies ExperienceTechnology[]
+  projects     Project[]
+
+  @@index([order])
+  @@map("experiences")
+}
+
+model ExperienceTechnology {
+  experienceId String
+  technologyId String
+
+  experience Experience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  technology Technology @relation(fields: [technologyId], references: [id], onDelete: Cascade)
+
+  @@id([experienceId, technologyId])
+  @@index([technologyId])
+  @@map("experience_technologies")
+}
+
+// ---------------------------------------------------------------------------
+// Skills
+// ---------------------------------------------------------------------------
+
+model Skill {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  category    String
+  icon        String?
+  color       String?
+  level       Int?
+  description String?
+  order       Int     @default(0)
+  published   Boolean @default(true)
+
+  @@index([order])
+  @@map("skills")
+}
+
+// ---------------------------------------------------------------------------
+// Contact
+// ---------------------------------------------------------------------------
+
+model ContactMessage {
+  id        String        @id @default(cuid())
+  name      String
+  email     String
+  subject   String
+  message   String        @db.Text
+  status    ContactStatus @default(NEW)
+  read      Boolean       @default(false)
+  ipHash    String?
+  userAgent String?
+  createdAt DateTime      @default(now())
+
+  @@index([status, createdAt])
+  @@map("contact_messages")
+}
+
+// ---------------------------------------------------------------------------
+// Analytics (first-party, no personal data)
+// ---------------------------------------------------------------------------
+
+model AnalyticsEvent {
+  id         String   @id @default(cuid())
+  event      String
+  path       String
+  projectId  String?
+  referrer   String?
+  deviceType String?
+  sessionId  String?
+  createdAt  DateTime @default(now())
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([event, createdAt])
+  @@index([projectId])
+  @@map("analytics_events")
+}
+
+// ---------------------------------------------------------------------------
+// Site settings (singleton)
+// ---------------------------------------------------------------------------
+
+model SiteSettings {
+  id                String   @id @default(cuid())
+  siteTitle         String
+  siteDescription   String   @db.Text
+  seoKeywords       String[] @default([])
+  ogImageUrl        String?
+  twitterHandle     String?
+  footerNote        String?
+  contactEmail      String?
+  analyticsEnabled  Boolean  @default(true)
+  updatedAt         DateTime @updatedAt
+
+  @@map("site_settings")
+}

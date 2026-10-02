@@ -1,0 +1,46 @@
+{
+  "name": "natsu-portfolio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Natsu — Frontend Developer & Anime Creator. Full-stack portfolio (React + NestJS + Prisma).",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:web": "cross-env NODE_ENV=development npm run dev -w @natsu/web",
+    "dev:api": "cross-env NODE_ENV=development npm run start:dev -w @natsu/api",
+    "build": "npm run build -w @natsu/api && npm run build -w @natsu/web",
+    "start": "npm run start:prod -w @natsu/api",
+    "preview": "npm run preview -w @natsu/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "format": "prettier --write \"**/*.{ts,tsx,js,cjs,json,css,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,cjs,json,css,md}\"",
+    "db:generate": "npm run prisma:generate -w @natsu/api",
+    "db:migrate": "npm run prisma:migrate -w @natsu/api",
+    "db:deploy": "npm run prisma:deploy -w @natsu/api",
+    "db:seed": "npm run prisma:seed -w @natsu/api",
+    "db:studio": "npm run prisma:studio -w @natsu/api",
+    "db:reset": "npm run prisma:reset -w @natsu/api",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "env:init": "node scripts/setup-env.mjs",
+    "setup": "node scripts/setup-env.mjs && npm install && npm run db:generate && npm run db:migrate && npm run db:seed"
+  },
+  "devDependencies": {
+    "concurrently": "9.0.1",
+    "cross-env": "7.0.3",
+    "prettier": "3.3.3"
+  },
+  "overrides": {
+    "express": "^4.22.3"
+  }
+}
