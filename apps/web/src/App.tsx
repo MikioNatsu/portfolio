@@ -1,10 +1,9 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { PublicLayout } from '@/layouts/PublicLayout';
-import { AdminLayout } from '@/layouts/AdminLayout';
+import { AdminBoot } from '@/components/admin/AdminBoot';
 import { ProtectedRoute } from '@/components/admin/ProtectedRoute';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { LoadingState } from '@/components/ui/States';
 
 /* Public routes */
 const Home = lazy(() => import('@/pages/Home'));
@@ -14,6 +13,13 @@ const ProjectDetail = lazy(() => import('@/pages/ProjectDetail'));
 const ExperiencePage = lazy(() => import('@/pages/ExperiencePage'));
 const ContactPage = lazy(() => import('@/pages/Contact'));
 const NotFound = lazy(() => import('@/pages/NotFound'));
+
+/* Admin shell — one chunk for the root providers and the layout */
+const loadAdminShell = () => import('@/layouts/admin-shell');
+const AdminRoot = lazy(() => loadAdminShell().then((module) => ({ default: module.AdminRoot })));
+const AdminLayout = lazy(() =>
+  loadAdminShell().then((module) => ({ default: module.AdminLayout })),
+);
 
 /* Admin routes */
 const AdminLogin = lazy(() => import('@/pages/admin/Login'));
@@ -44,33 +50,33 @@ export default function App() {
 
         {/* ---------------- Admin ---------------- */}
         <Route
-          path="/admin/login"
-          element={
-            <Suspense fallback={<LoadingState label="Loading" className="min-h-dvh" />}>
-              <AdminLogin />
-            </Suspense>
-          }
-        />
-
-        <Route
           path="/admin"
           element={
-            <ProtectedRoute>
-              <AdminLayout />
-            </ProtectedRoute>
+            <Suspense fallback={<AdminBoot />}>
+              <AdminRoot />
+            </Suspense>
           }
         >
-          <Route index element={<AdminDashboard />} />
-          <Route path="projects" element={<AdminProjects />} />
-          <Route path="projects/new" element={<AdminProjectForm mode="create" />} />
-          <Route path="projects/:id/edit" element={<AdminProjectForm mode="edit" />} />
-          <Route path="experience" element={<AdminExperience />} />
-          <Route path="skills" element={<AdminSkills />} />
-          <Route path="messages" element={<AdminMessages />} />
-          <Route path="profile" element={<AdminProfile />} />
-          <Route path="analytics" element={<AdminAnalytics />} />
-          <Route path="settings" element={<AdminSettings />} />
-          <Route path="*" element={<Navigate to="/admin" replace />} />
+          <Route path="login" element={<AdminLogin />} />
+          <Route
+            element={
+              <ProtectedRoute>
+                <AdminLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<AdminDashboard />} />
+            <Route path="projects" element={<AdminProjects />} />
+            <Route path="projects/new" element={<AdminProjectForm mode="create" />} />
+            <Route path="projects/:id/edit" element={<AdminProjectForm mode="edit" />} />
+            <Route path="experience" element={<AdminExperience />} />
+            <Route path="skills" element={<AdminSkills />} />
+            <Route path="messages" element={<AdminMessages />} />
+            <Route path="profile" element={<AdminProfile />} />
+            <Route path="analytics" element={<AdminAnalytics />} />
+            <Route path="settings" element={<AdminSettings />} />
+            <Route path="*" element={<Navigate to="/admin" replace />} />
+          </Route>
         </Route>
       </Routes>
     </ErrorBoundary>

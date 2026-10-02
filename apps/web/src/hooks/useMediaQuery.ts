@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** Subscribe to a CSS media query. */
 export function useMediaQuery(query: string): boolean {
@@ -42,4 +42,29 @@ export function useMounted(): boolean {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   return mounted;
+}
+
+/**
+ * Live content width of an element (ResizeObserver); `fallback` until measured.
+ * Uses a callback ref so it keeps tracking if the element is swapped out.
+ */
+export function useElementWidth<T extends HTMLElement = HTMLDivElement>(fallback: number) {
+  const [width, setWidth] = useState(fallback);
+  const observer = useRef<ResizeObserver | null>(null);
+
+  const ref = useCallback((node: T | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    observer.current = new ResizeObserver(([entry]) => {
+      const next = Math.round(entry?.contentRect.width ?? 0);
+      if (next > 0) setWidth(next);
+    });
+    observer.current.observe(node);
+  }, []);
+
+  // No unmount effect: React calls the callback ref with `null` on unmount,
+  // which disconnects above. (An effect cleanup would also fire during
+  // StrictMode's simulated remount and kill the observer for good.)
+  return { ref, width };
 }

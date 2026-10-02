@@ -48,6 +48,127 @@
     --glass-strong: rgba(16, 8, 27, 0.84);
   }
 
+  /* ------------------------------------------------------------------------
+     Admin "system" palette — Apple-inspired, light + dark.
+     Applied while the admin is mounted via `html[data-admin-appearance]`.
+     RGB triplets feed Tailwind's `sys-*` colours (opacity modifiers work);
+     full colour values are used where Apple's own tokens carry alpha.
+     ------------------------------------------------------------------------ */
+  html[data-admin-appearance='light'] {
+    color-scheme: light;
+    --sys-canvas: 245 245 247;
+    --sys-surface: 255 255 255;
+    --sys-elevated: 255 255 255;
+    --sys-label: 29 29 31;
+    --sys-secondary: rgba(60, 60, 67, 0.72);
+    --sys-tertiary: rgba(60, 60, 67, 0.42);
+    --sys-separator: rgba(60, 60, 67, 0.16);
+    --sys-fill: rgba(120, 120, 128, 0.2);
+    --sys-fill-2: rgba(120, 120, 128, 0.16);
+    --sys-fill-3: rgba(118, 118, 128, 0.12);
+    --sys-fill-4: rgba(116, 116, 128, 0.07);
+    --sys-field: #ffffff;
+    --sys-field-border: rgba(0, 0, 0, 0.13);
+    --sys-thumb: #ffffff;
+    --sys-material: rgba(250, 250, 252, 0.74);
+    --sys-scrim: rgba(0, 0, 0, 0.22);
+    --sys-card-shadow: 0 0 0 1px rgba(0, 0, 0, 0.035), 0 1px 2px rgba(0, 0, 0, 0.04),
+      0 8px 24px -14px rgba(0, 0, 0, 0.12);
+    --sys-pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 12px 32px -6px rgba(0, 0, 0, 0.18),
+      0 32px 80px -24px rgba(0, 0, 0, 0.22);
+
+    --sys-accent: 124 58 237;
+    --sys-accent-fill: 124 58 237;
+    --sys-red: 255 59 48;
+    --sys-orange: 255 149 0;
+    --sys-yellow: 255 204 0;
+    --sys-green: 52 199 89;
+    --sys-teal: 48 176 199;
+    --sys-blue: 0 122 255;
+    --sys-indigo: 88 86 214;
+    --sys-purple: 175 82 222;
+    --sys-pink: 255 45 85;
+    --sys-gray: 142 142 147;
+    --sys-red-ink: 215 0 21;
+    --sys-orange-ink: 178 72 0;
+    --sys-green-ink: 36 138 61;
+    --sys-blue-ink: 0 64 221;
+  }
+
+  html[data-admin-appearance='dark'] {
+    color-scheme: dark;
+    --sys-canvas: 10 10 11;
+    --sys-surface: 28 28 30;
+    --sys-elevated: 38 38 41;
+    --sys-label: 245 245 247;
+    --sys-secondary: rgba(235, 235, 245, 0.64);
+    --sys-tertiary: rgba(235, 235, 245, 0.4);
+    --sys-separator: rgba(84, 84, 88, 0.55);
+    --sys-fill: rgba(120, 120, 128, 0.36);
+    --sys-fill-2: rgba(120, 120, 128, 0.32);
+    --sys-fill-3: rgba(118, 118, 128, 0.24);
+    --sys-fill-4: rgba(118, 118, 128, 0.16);
+    --sys-field: rgba(118, 118, 128, 0.14);
+    --sys-field-border: rgba(255, 255, 255, 0.08);
+    --sys-thumb: #636366;
+    --sys-material: rgba(24, 24, 27, 0.72);
+    --sys-scrim: rgba(0, 0, 0, 0.55);
+    --sys-card-shadow: 0 0 0 1px rgba(255, 255, 255, 0.055), 0 12px 32px -18px rgba(0, 0, 0, 0.9);
+    --sys-pop-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 16px 40px -8px rgba(0, 0, 0, 0.6),
+      0 40px 100px -30px rgba(0, 0, 0, 0.8);
+
+    --sys-accent: 191 90 242;
+    --sys-accent-fill: 142 68 236;
+    --sys-red: 255 69 58;
+    --sys-orange: 255 159 10;
+    --sys-yellow: 255 214 10;
+    --sys-green: 48 209 88;
+    --sys-teal: 64 200 224;
+    --sys-blue: 10 132 255;
+    --sys-indigo: 94 92 230;
+    --sys-purple: 191 90 242;
+    --sys-pink: 255 55 95;
+    --sys-gray: 142 142 147;
+    --sys-red-ink: 255 105 97;
+    --sys-orange-ink: 255 179 64;
+    --sys-green-ink: 48 209 88;
+    --sys-blue-ink: 100 170 255;
+  }
+
+  html[data-admin-appearance] body {
+    @apply font-system;
+    color: rgb(var(--sys-label));
+    background: rgb(var(--sys-canvas));
+    background-image: none;
+    font-feature-settings: 'cv11', 'ss01';
+    letter-spacing: -0.006em;
+  }
+
+  html[data-admin-appearance] ::selection {
+    background: rgb(var(--sys-accent) / 0.28);
+    color: inherit;
+  }
+
+  /* `:where` keeps specificity at the base level so utilities can still opt out. */
+  :where(html[data-admin-appearance]) :focus-visible {
+    outline: 3px solid rgb(var(--sys-accent) / 0.5);
+    outline-offset: 2px;
+  }
+
+  html[data-admin-appearance] ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  html[data-admin-appearance] ::-webkit-scrollbar-thumb,
+  html[data-admin-appearance] ::-webkit-scrollbar-thumb:hover {
+    background: var(--sys-fill);
+    background-clip: content-box;
+  }
+
+  html[data-admin-appearance] input[type='search']::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
   * {
     @apply border-white/[0.07];
   }
@@ -64,8 +185,7 @@
     min-height: 100dvh;
     overflow-x: hidden;
     background-color: var(--page-bg);
-    background-image:
-      radial-gradient(1100px 620px at 78% -8%, var(--glow-1), transparent 62%),
+    background-image: radial-gradient(1100px 620px at 78% -8%, var(--glow-1), transparent 62%),
       radial-gradient(880px 520px at 6% 4%, var(--glow-2), transparent 58%),
       radial-gradient(760px 620px at 50% 108%, var(--glow-3), transparent 60%);
     background-attachment: fixed;
@@ -234,9 +354,35 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
   }
 
+  /* Admin surfaces ---------------------------------------------------------- */
+  .sys-card {
+    background: rgb(var(--sys-surface));
+    border-radius: 1.125rem;
+    box-shadow: var(--sys-card-shadow);
+  }
+
+  /* Translucent "vibrancy" material used by bars, menus and sheets. */
+  .sys-material {
+    background: var(--sys-material);
+    backdrop-filter: saturate(180%) blur(22px);
+    -webkit-backdrop-filter: saturate(180%) blur(22px);
+  }
+
+  .sys-skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--sys-fill-4);
+  }
+  .sys-skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, var(--sys-fill-4), transparent);
+    @apply animate-sys-shimmer;
+  }
+
   .card-surface {
-    background:
-      linear-gradient(160deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0) 42%),
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0) 42%),
       rgba(13, 11, 28, 0.72);
     border: 1px solid var(--hairline-soft);
     backdrop-filter: blur(14px);

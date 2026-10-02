@@ -1,10 +1,14 @@
-import { useRef, useState } from 'react';
-import { ImagePlus, Link2, LoaderCircle, Trash2, Upload } from 'lucide-react';
+import { useId, useRef, useState, type DragEvent } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { ImageUp, Link2, LoaderCircle, Trash2 } from 'lucide-react';
 import { adminApi, ApiError } from '@/api/client';
+import { EASE_IOS } from '@/animations/variants';
 import { SmartImage } from '@/components/ui/SmartImage';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Field';
 import { cn } from '@/lib/utils';
+
+const ACCEPT = 'image/png,image/jpeg,image/webp,image/avif,image/svg+xml';
 
 interface ImageUploaderProps {
   label: string;
@@ -16,9 +20,9 @@ interface ImageUploaderProps {
 }
 
 /**
- * Single-image field supporting both an upload (Cloudinary or local disk,
- * whichever the API is configured with) and a direct URL — so the CMS works
- * even before storage credentials exist.
+ * Single-image field: drop a file, pick one, or paste a URL. Uploads go to
+ * Cloudinary or local disk — whichever the API is configured with — so the
+ * CMS works before storage credentials exist.
  */
 export function ImageUploader({
   label,
@@ -29,13 +33,19 @@ export function ImageUploader({
   className,
 }: ImageUploaderProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const labelId = useId();
   const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showUrl, setShowUrl] = useState(false);
   const [urlDraft, setUrlDraft] = useState('');
 
-  const onFile = async (file: File | undefined) => {
+  const upload = async (file: File | undefined) => {
     if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('That file is not an image.');
+      return;
+    }
     setError(null);
     setUploading(true);
     try {
@@ -49,42 +59,87 @@ export function ImageUploader({
     }
   };
 
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    void upload(event.dataTransfer.files?.[0]);
+  };
+
+  const applyUrl = () => {
+    const url = urlDraft.trim();
+    if (url && !/^(https?:\/\/|\/)/i.test(url)) {
+      setError('Use an absolute https:// URL or a /path on this site.');
+      return;
+    }
+    setError(null);
+    onChange(url || null);
+    setUrlDraft('');
+    setShowUrl(false);
+  };
+
   return (
-    <div className={cn('space-y-2', className)}>
+    <div className={cn('space-y-2.5', className)} role="group" aria-labelledby={labelId}>
       <div className="flex items-baseline justify-between gap-3">
-        <span className="text-xs font-medium uppercase tracking-[0.16em] text-haze-300">
+        <span id={labelId} className="text-[13px] font-medium text-sys-secondary">
           {label}
         </span>
         {value && (
           <button
             type="button"
             onClick={() => onChange(null)}
-            className="inline-flex items-center gap-1 text-2xs uppercase tracking-[0.14em] text-rose-300 hover:text-rose-200"
+            className="inline-flex items-center gap-1 text-[13px] font-medium text-sys-red-ink transition-opacity hover:opacity-75"
           >
-            <Trash2 className="h-3 w-3" />
+            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
             Remove
           </button>
         )}
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-white/[0.08]">
-        <SmartImage
-          src={value}
-          alt={label}
-          label={label}
-          accent="#A855F7"
-          aspect={aspect}
-          className="bg-ink-900/60"
-        />
+      <div
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        className={cn(
+          'relative overflow-hidden rounded-xl shadow-[inset_0_0_0_1px_var(--sys-separator)] transition-[box-shadow,transform] duration-300 ease-ios',
+          dragging && 'scale-[0.99] shadow-[inset_0_0_0_2px_rgb(var(--sys-accent))]',
+        )}
+      >
+        <SmartImage src={value} alt={label} label={label} accent="#A855F7" aspect={aspect} />
+        <AnimatePresence>
+          {(uploading || dragging) && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="sys-material absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm font-medium text-sys-label"
+            >
+              {uploading ? (
+                <>
+                  <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" />
+                  Uploading…
+                </>
+              ) : (
+                <>
+                  <ImageUp className="h-5 w-5" aria-hidden="true" />
+                  Drop to upload
+                </>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <div className="flex flex-wrap gap-2">
         <input
           ref={inputRef}
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/avif,image/svg+xml"
+          accept={ACCEPT}
           className="hidden"
-          onChange={(event) => void onFile(event.target.files?.[0])}
+          tabIndex={-1}
+          onChange={(event) => void upload(event.target.files?.[0])}
         />
         <Button
           type="button"
@@ -92,20 +147,15 @@ export function ImageUploader({
           size="sm"
           disabled={uploading}
           onClick={() => inputRef.current?.click()}
-          iconLeft={
-            uploading ? (
-              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Upload className="h-3.5 w-3.5" />
-            )
-          }
+          iconLeft={<ImageUp className="h-3.5 w-3.5" />}
         >
-          {uploading ? 'Uploading' : 'Upload'}
+          {value ? 'Replace…' : 'Choose image…'}
         </Button>
         <Button
           type="button"
           variant="ghost"
           size="sm"
+          aria-expanded={showUrl}
           onClick={() => setShowUrl((open) => !open)}
           iconLeft={<Link2 className="h-3.5 w-3.5" />}
         >
@@ -113,144 +163,42 @@ export function ImageUploader({
         </Button>
       </div>
 
-      {showUrl && (
-        <div className="flex items-end gap-2">
-          <Input
-            label="Image URL"
-            placeholder="https://…"
-            value={urlDraft}
-            onChange={(event) => setUrlDraft(event.target.value)}
-            containerClassName="flex-1"
-          />
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => {
-              onChange(urlDraft.trim() || null);
-              setUrlDraft('');
-              setShowUrl(false);
-            }}
-            iconLeft={<ImagePlus className="h-3.5 w-3.5" />}
+      <AnimatePresence initial={false}>
+        {showUrl && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.28, ease: EASE_IOS }}
+            className="overflow-hidden"
           >
-            Apply
-          </Button>
-        </div>
-      )}
+            <div className="flex items-end gap-2 pt-0.5">
+              <Input
+                label="Image URL"
+                placeholder="https://…"
+                value={urlDraft}
+                onChange={(event) => setUrlDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    applyUrl();
+                  }
+                }}
+                containerClassName="flex-1"
+              />
+              <Button type="button" size="md" onClick={applyUrl}>
+                Apply
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {error && (
-        <p role="alert" className="text-xs text-rose-300">
+        <p role="alert" className="text-xs font-medium text-sys-red-ink">
           {error}
         </p>
       )}
-    </div>
-  );
-}
-
-interface StringListInputProps {
-  label: string;
-  value: string[];
-  onChange: (value: string[]) => void;
-  placeholder?: string;
-  hint?: string;
-  /** Renders each entry with its own button instead of a textarea. */
-  multiline?: boolean;
-  rows?: number;
-}
-
-/**
- * List editor for simple string arrays (features, tech names, keywords).
- * Stored as one entry per line — quick to edit, impossible to get wrong.
- */
-export function StringListInput({
-  label,
-  value,
-  onChange,
-  placeholder,
-  hint,
-  multiline = true,
-}: StringListInputProps) {
-  const [draft, setDraft] = useState('');
-
-  const remove = (index: number) => onChange(value.filter((_, position) => position !== index));
-
-  if (!multiline) {
-    const add = () => {
-      const next = draft.trim();
-      if (!next) return;
-      onChange([...value, next]);
-      setDraft('');
-    };
-
-    return (
-      <div className="space-y-2">
-        <span className="text-xs font-medium uppercase tracking-[0.16em] text-haze-300">
-          {label}
-        </span>
-        <div className="flex items-end gap-2">
-          <Input
-            label=""
-            placeholder={placeholder}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                add();
-              }
-            }}
-            containerClassName="flex-1"
-          />
-          <Button type="button" size="sm" onClick={add}>
-            Add
-          </Button>
-        </div>
-        {value.length > 0 && (
-          <div className="flex flex-wrap gap-2 pt-1">
-            {value.map((entry, index) => (
-              <span
-                key={`${entry}-${index}`}
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-haze-200"
-              >
-                {entry}
-                <button
-                  type="button"
-                  onClick={() => remove(index)}
-                  aria-label={`Remove ${entry}`}
-                  className="text-haze-400 transition-colors hover:text-rose-300"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-        {hint && <p className="text-2xs text-haze-400">{hint}</p>}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      <label className="block space-y-2">
-        <span className="text-xs font-medium uppercase tracking-[0.16em] text-haze-300">
-          {label}
-        </span>
-        <textarea
-          rows={5}
-          value={value.join('\n')}
-          placeholder={placeholder}
-          onChange={(event) =>
-            onChange(
-              event.target.value
-                .split('\n')
-                .map((line) => line.trim())
-                .filter((line, index, all) => line.length > 0 || index === all.length - 1),
-            )
-          }
-          className="w-full resize-y rounded-2xl border border-white/10 bg-ink-800/70 px-4 py-3 text-sm text-haze-100 placeholder:text-haze-400/70 transition-colors focus:border-accent-violet/60 focus:outline-none focus:ring-4 focus:ring-accent-violet/12"
-        />
-      </label>
-      {hint && <p className="text-2xs text-haze-400">{hint}</p>}
     </div>
   );
 }

@@ -1,249 +1,331 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Mail, MailOpen, Search, Trash2 } from 'lucide-react';
-import { adminApi } from '@/api/client';
-import { AdminPageHeader, ConfirmDialog, Panel } from '@/components/admin/AdminUI';
-import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Mail, MailOpen, Reply, Trash2 } from 'lucide-react';
 import type { ContactMessage } from '@natsu/types';
-import { formatDate, formatRelative } from '@/lib/utils';
+import { adminApi, ApiError } from '@/api/client';
+import { EASE_IOS } from '@/animations/variants';
+import { IconButton } from '@/components/admin/IconButton';
+import { MessageRow } from '@/components/admin/MessageRow';
+import { PageHeader } from '@/components/admin/PageHeader';
+import { Pagination } from '@/components/admin/Pagination';
+import { SearchField } from '@/components/admin/SearchField';
+import { SegmentedControl } from '@/components/admin/SegmentedControl';
+import { ConfirmDialog, Sheet } from '@/components/admin/Sheet';
+import { ListSkeleton } from '@/components/admin/Skeleton';
+import { Button } from '@/components/ui/Button';
+import { EmptyState, ErrorState } from '@/components/ui/States';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { useToast } from '@/hooks/useToast';
+import { QUERY_KEYS } from '@/lib/constants';
+import { patchPaginatedItem, restoreQueries, type QuerySnapshot } from '@/lib/query';
+import { cn, formatDate, initials } from '@/lib/utils';
 
 const PAGE_SIZE = 12;
+const MESSAGES_KEY = ['admin', 'messages'] as const;
+
+const FILTERS = [
+  { value: '', label: 'All' },
+  { value: 'NEW', label: 'Unread' },
+  { value: 'READ', label: 'Read' },
+  { value: 'ARCHIVED', label: 'Archived' },
+] as const;
+
+type Filter = (typeof FILTERS)[number]['value'];
+
+/** Reading pane / sheet body for one message. */
+function MessageDetail({
+  message,
+  onToggleRead,
+  onDelete,
+  showSubject = true,
+}: {
+  message: ContactMessage;
+  onToggleRead: () => void;
+  onDelete: () => void;
+  /** Off inside the phone sheet, whose title already shows the subject. */
+  showSubject?: boolean;
+}) {
+  const replyHref = `mailto:${message.email}?subject=${encodeURIComponent(`Re: ${message.subject}`)}`;
+
+  return (
+    <article className="flex h-full flex-col">
+      <header className="flex items-start gap-3 border-b border-sys-separator pb-4">
+        <span
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[#A5A5AA] to-[#7C7C82] text-sm font-semibold text-white"
+          aria-hidden="true"
+        >
+          {initials(message.name)}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[15px] font-semibold text-sys-label">{message.name}</p>
+          <a
+            href={`mailto:${message.email}`}
+            className="block truncate text-[13px] text-sys-accent hover:underline"
+          >
+            {message.email}
+          </a>
+          <time dateTime={message.createdAt} className="block text-[12px] text-sys-secondary">
+            {formatDate(message.createdAt)}
+          </time>
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <IconButton
+            label={message.read ? 'Mark as unread' : 'Mark as read'}
+            icon={message.read ? Mail : MailOpen}
+            onClick={onToggleRead}
+          />
+          <IconButton label="Delete message" icon={Trash2} tone="danger" onClick={onDelete} />
+        </div>
+      </header>
+
+      {showSubject && (
+        <h2 className="mt-5 text-xl font-semibold tracking-[-0.015em] text-sys-label">
+          {message.subject}
+        </h2>
+      )}
+      <p
+        className={cn(
+          'whitespace-pre-line text-[15px] leading-7 text-sys-label/90',
+          showSubject ? 'mt-3' : 'mt-5',
+        )}
+      >
+        {message.message}
+      </p>
+
+      <div className="mt-6">
+        <Button href={replyHref} size="sm" iconLeft={<Reply className="h-4 w-4" />}>
+          Reply by email
+        </Button>
+      </div>
+    </article>
+  );
+}
 
 export default function AdminMessages() {
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const wide = useMediaQuery('(min-width: 1024px)');
   const [page, setPage] = useState(1);
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState<Filter>('');
   const [search, setSearch] = useState('');
-  const [open, setOpen] = useState<ContactMessage | null>(null);
+  const [selected, setSelected] = useState<ContactMessage | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ContactMessage | null>(null);
+  const debouncedSearch = useDebouncedValue(search.trim());
 
   const messages = useQuery({
-    queryKey: ['admin', 'messages', { page, status, search }],
-    queryFn: () => adminApi.listMessages({ page, pageSize: PAGE_SIZE, status, search }),
+    queryKey: QUERY_KEYS.adminMessages({ page, status, search: debouncedSearch }),
+    queryFn: () =>
+      adminApi.listMessages({ page, pageSize: PAGE_SIZE, status, search: debouncedSearch }),
+    placeholderData: keepPreviousData,
   });
+
+  const items = messages.data?.items ?? [];
+  // Prefer the live copy (read state changes) but keep showing a message that
+  // dropped out of the current filter after being read.
+  const current = selected ? (items.find((item) => item.id === selected.id) ?? selected) : null;
 
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['admin'] });
 
-  const markRead = useMutation({
-    mutationFn: ({ id, read }: { id: string; read: boolean }) => adminApi.markMessageRead(id, read),
-    onSuccess: invalidate,
+  const markRead = useMutation<
+    ContactMessage,
+    unknown,
+    { message: ContactMessage; read: boolean },
+    { snapshot: QuerySnapshot }
+  >({
+    mutationFn: ({ message, read }) => adminApi.markMessageRead(message.id, read),
+    onMutate: async ({ message, read }) => {
+      setSelected((open) => (open?.id === message.id ? { ...open, read } : open));
+      return {
+        snapshot: await patchPaginatedItem<ContactMessage>(queryClient, MESSAGES_KEY, message.id, {
+          read,
+        }),
+      };
+    },
+    onError: (_error, _variables, context) => {
+      restoreQueries(queryClient, context?.snapshot);
+      toast({ tone: 'error', title: 'Couldn’t update the message' });
+    },
+    onSettled: invalidate,
   });
 
   const remove = useMutation({
-    mutationFn: (id: string) => adminApi.deleteMessage(id),
-    onSuccess: () => {
+    mutationFn: (message: ContactMessage) => adminApi.deleteMessage(message.id),
+    onSuccess: (_result, message) => {
       setPendingDelete(null);
-      setOpen(null);
+      setSelected((open) => (open?.id === message.id ? null : open));
+      toast({ title: 'Message deleted' });
       invalidate();
     },
+    onError: (caught) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t delete the message',
+        description: caught instanceof ApiError ? caught.message : undefined,
+      }),
   });
 
-  const view = (message: ContactMessage) => {
-    setOpen(message);
-    if (!message.read) markRead.mutate({ id: message.id, read: true });
+  const open = (message: ContactMessage) => {
+    setSelected(message);
+    if (!message.read) markRead.mutate({ message, read: true });
   };
+
+  // Arriving from the dashboard with a specific message: open it once, then
+  // clear the router state so closing it later can't re-trigger the request.
+  const requestedId = (location.state as { messageId?: string } | null)?.messageId;
+  const openRef = useRef(open);
+  openRef.current = open;
+  useEffect(() => {
+    if (!requestedId || !messages.data) return;
+    const match = messages.data.items.find((item) => item.id === requestedId);
+    if (match) openRef.current(match);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [requestedId, messages.data, navigate, location.pathname]);
+
+  const filtersActive = Boolean(debouncedSearch || status);
+  const refreshing = messages.isPlaceholderData && messages.isFetching;
+
+  const detail = current ? (
+    <MessageDetail
+      message={current}
+      showSubject={wide}
+      onToggleRead={() => markRead.mutate({ message: current, read: !current.read })}
+      onDelete={() => setPendingDelete(current)}
+    />
+  ) : null;
 
   return (
     <div className="space-y-6">
-      <AdminPageHeader
+      <PageHeader
         title="Messages"
         description="Submissions from the public contact form, newest first."
       />
 
-      <Panel>
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-haze-400" />
-            <input
-              type="search"
+      <div className="sys-card overflow-hidden lg:grid lg:h-[calc(100dvh-13.5rem)] lg:min-h-[32rem] lg:grid-cols-[minmax(20rem,26rem)_1fr]">
+        <section
+          aria-label="Inbox"
+          className="flex min-h-0 flex-col lg:border-r lg:border-sys-separator"
+        >
+          <div className="space-y-2.5 border-b border-sys-separator p-3">
+            <SearchField
+              label="Search messages"
+              placeholder="Search name, email or subject"
               value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
+              onChange={(value) => {
+                setSearch(value);
                 setPage(1);
               }}
-              placeholder="Search name, email or subject…"
-              aria-label="Search messages"
-              className="w-full rounded-2xl border border-white/10 bg-ink-800/70 py-3 pl-11 pr-4 text-sm text-haze-100 placeholder:text-haze-400/70 focus:border-accent-violet/60 focus:outline-none focus:ring-4 focus:ring-accent-violet/12"
+            />
+            <SegmentedControl
+              label="Filter messages"
+              options={FILTERS}
+              value={status}
+              onChange={(value) => {
+                setStatus(value);
+                setPage(1);
+              }}
+              size="sm"
+              fullWidth
             />
           </div>
 
-          <div className="flex gap-2">
-            {[
-              { value: '', label: 'All' },
-              { value: 'NEW', label: 'Unread' },
-              { value: 'READ', label: 'Read' },
-              { value: 'ARCHIVED', label: 'Archived' },
-            ].map((option) => (
-              <button
-                key={option.value || 'all'}
-                type="button"
-                onClick={() => {
-                  setStatus(option.value);
-                  setPage(1);
-                }}
-                className={
-                  status === option.value
-                    ? 'rounded-full border border-accent-violet/45 bg-accent-violet/12 px-3.5 py-2 text-xs text-white'
-                    : 'rounded-full border border-white/10 px-3.5 py-2 text-xs text-haze-400 transition-colors hover:text-haze-100'
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            {messages.isLoading ? (
+              <ListSkeleton rows={6} />
+            ) : messages.isError ? (
+              <ErrorState title="Couldn’t load messages" onRetry={() => messages.refetch()} />
+            ) : items.length === 0 ? (
+              <EmptyState
+                title={filtersActive ? 'No matching messages' : 'Inbox is empty'}
+                description={
+                  filtersActive
+                    ? 'Try a different search or filter.'
+                    : 'When someone uses the contact form, their message lands here.'
                 }
+                icon={<Mail className="h-5 w-5" />}
+              />
+            ) : (
+              <ul
+                className={cn('space-y-0.5 p-2 transition-opacity', refreshing && 'opacity-60')}
+                aria-busy={refreshing}
               >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </Panel>
-
-      <Panel className="p-0">
-        {messages.isLoading ? (
-          <LoadingState label="Loading messages" />
-        ) : messages.isError || !messages.data ? (
-          <ErrorState title="Could not load messages" onRetry={() => messages.refetch()} />
-        ) : messages.data.items.length === 0 ? (
-          <EmptyState
-            title="Inbox is empty"
-            description="When someone uses the contact form, their message lands here."
-          />
-        ) : (
-          <>
-            <ul className="divide-y divide-white/[0.05]">
-              {messages.data.items.map((message) => (
-                <li key={message.id}>
-                  <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
-                    <button
-                      type="button"
-                      onClick={() => view(message)}
-                      className="flex flex-1 items-start gap-4 text-left"
-                    >
-                      <span
-                        className={
-                          message.read
-                            ? 'mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 text-haze-400'
-                            : 'mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-accent-violet/40 bg-accent-violet/12 text-accent-fuchsia'
-                        }
-                      >
-                        {message.read ? (
-                          <MailOpen className="h-3.5 w-3.5" />
-                        ) : (
-                          <Mail className="h-3.5 w-3.5" />
-                        )}
-                      </span>
-
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-2.5">
-                          <span className="text-sm font-medium text-haze-100">{message.name}</span>
-                          <span className="text-2xs text-haze-400">{message.email}</span>
-                          {!message.read && <Badge tone="accent">New</Badge>}
-                        </span>
-                        <span className="mt-1 block truncate text-sm text-haze-300">
-                          {message.subject}
-                        </span>
-                        <span className="mt-0.5 line-clamp-2 block text-xs text-haze-400">
-                          {message.message}
-                        </span>
-                      </span>
-                    </button>
-
-                    <div className="flex items-center gap-2 sm:flex-col sm:items-end">
-                      <span
-                        className="whitespace-nowrap text-2xs text-haze-400"
-                        title={formatDate(message.createdAt)}
-                      >
-                        {formatRelative(message.createdAt)}
-                      </span>
-                      <div className="flex gap-1.5">
-                        <Button
-                          variant="subtle"
-                          size="sm"
-                          onClick={() => markRead.mutate({ id: message.id, read: !message.read })}
-                        >
-                          Mark {message.read ? 'unread' : 'read'}
-                        </Button>
-                        <button
-                          type="button"
-                          aria-label="Delete message"
-                          onClick={() => setPendingDelete(message)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-haze-400 transition-colors hover:border-rose-400/50 hover:text-rose-200"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-
-            {messages.data.totalPages > 1 && (
-              <div className="flex items-center justify-between gap-4 border-t border-white/[0.06] px-5 py-4">
-                <p className="text-2xs uppercase tracking-[0.16em] text-haze-400">
-                  Page {messages.data.page} of {messages.data.totalPages} · {messages.data.total}{' '}
-                  total
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="subtle"
-                    size="sm"
-                    disabled={page <= 1}
-                    onClick={() => setPage((value) => value - 1)}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="subtle"
-                    size="sm"
-                    disabled={page >= messages.data.totalPages}
-                    onClick={() => setPage((value) => value + 1)}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
+                {items.map((message) => (
+                  <li key={message.id}>
+                    <MessageRow
+                      message={message}
+                      selected={wide && current?.id === message.id}
+                      onSelect={() => open(message)}
+                    />
+                  </li>
+                ))}
+              </ul>
             )}
-          </>
-        )}
-      </Panel>
-
-      {open && (
-        <Panel
-          title={open.subject}
-          description={`${open.name} · ${open.email} · ${formatDate(open.createdAt)}`}
-          actions={
-            <Button variant="ghost" size="sm" onClick={() => setOpen(null)}>
-              Close
-            </Button>
-          }
-        >
-          <p className="whitespace-pre-line text-sm leading-relaxed text-haze-200">
-            {open.message}
-          </p>
-          <div className="mt-5 flex flex-wrap gap-2.5">
-            <Button
-              size="sm"
-              href={`mailto:${open.email}?subject=Re: ${encodeURIComponent(open.subject)}`}
-            >
-              Reply by email
-            </Button>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setPendingDelete(open)}
-              iconLeft={<Trash2 className="h-3.5 w-3.5" />}
-            >
-              Delete
-            </Button>
           </div>
-        </Panel>
+
+          {messages.data && (
+            <Pagination
+              page={messages.data.page}
+              totalPages={messages.data.totalPages}
+              total={messages.data.total}
+              noun={messages.data.total === 1 ? 'message' : 'messages'}
+              onPageChange={setPage}
+            />
+          )}
+        </section>
+
+        {wide && (
+          <section aria-label="Message" className="min-h-0 overflow-y-auto p-6 lg:p-8">
+            <AnimatePresence mode="wait" initial={false}>
+              {detail ? (
+                <motion.div
+                  key={current?.id}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.25, ease: EASE_IOS }}
+                  className="mx-auto max-w-2xl"
+                >
+                  {detail}
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="empty"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex h-full items-center justify-center"
+                >
+                  <p className="text-[15px] font-medium text-sys-tertiary">No message selected</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </section>
+        )}
+      </div>
+
+      {!wide && (
+        <Sheet
+          open={Boolean(current)}
+          onClose={() => setSelected(null)}
+          title={current?.subject ?? 'Message'}
+          size="md"
+        >
+          {detail}
+        </Sheet>
       )}
 
       <ConfirmDialog
         open={Boolean(pendingDelete)}
         title="Delete this message?"
+        description={
+          pendingDelete ? `From ${pendingDelete.name}. This can’t be undone.` : undefined
+        }
         loading={remove.isPending}
         onCancel={() => setPendingDelete(null)}
-        onConfirm={() => pendingDelete && remove.mutate(pendingDelete.id)}
+        onConfirm={() => pendingDelete && remove.mutate(pendingDelete)}
       />
     </div>
   );

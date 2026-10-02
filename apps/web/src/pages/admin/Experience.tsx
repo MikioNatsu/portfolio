@@ -1,15 +1,26 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Route, Trash2 } from 'lucide-react';
 import type { Experience } from '@natsu/types';
 import { adminApi, ApiError } from '@/api/client';
-import { AdminModal, AdminPageHeader, ConfirmDialog, Panel } from '@/components/admin/AdminUI';
-import { StringListInput } from '@/components/admin/ImageUploader';
+import { InlineAlert, Panel } from '@/components/admin/Card';
+import { TagInput } from '@/components/admin/Fields';
+import { IconButton } from '@/components/admin/IconButton';
+import { PageHeader } from '@/components/admin/PageHeader';
+import { ConfirmDialog, Sheet } from '@/components/admin/Sheet';
+import { ListSkeleton } from '@/components/admin/Skeleton';
+import { SortableList } from '@/components/admin/SortableList';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input, Switch, Textarea } from '@/components/ui/Field';
-import { Badge } from '@/components/ui/Badge';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
+import { EmptyState, ErrorState } from '@/components/ui/States';
+import { useCreateIntent } from '@/hooks/useCreateIntent';
+import { useReorderableList } from '@/hooks/useReorderableList';
+import { useToast } from '@/hooks/useToast';
+import { QUERY_KEYS } from '@/lib/constants';
 import { formatDateRange } from '@/lib/utils';
+
+const FORM_ID = 'experience-form';
 
 interface FormValues {
   organization: string;
@@ -55,16 +66,36 @@ function toMonth(value?: string | null): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+function toForm(item: Experience): FormValues {
+  return {
+    organization: item.organization,
+    role: item.role,
+    description: item.description,
+    startDate: toMonth(item.startDate),
+    endDate: toMonth(item.endDate),
+    current: item.current,
+    location: item.location ?? '',
+    url: item.url ?? '',
+    imageUrl: item.imageUrl ?? '',
+    technologies: item.technologies.map((technology) => technology.name),
+    published: item.published,
+  };
+}
+
+const errorMessage = (error: unknown, fallback: string) =>
+  error instanceof ApiError ? error.message : fallback;
+
 export default function AdminExperience() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<Experience | null>(null);
-  const [creating, setCreating] = useState(false);
   const [values, setValues] = useState<FormValues>(EMPTY);
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Experience | null>(null);
 
   const list = useQuery({
-    queryKey: ['admin', 'experience'],
+    queryKey: QUERY_KEYS.adminExperience,
     queryFn: () => adminApi.listExperience(),
   });
 
@@ -73,73 +104,68 @@ export default function AdminExperience() {
     void queryClient.invalidateQueries({ queryKey: ['experience'] });
   };
 
+  const { ordered, setOrdered, commit } = useReorderableList({
+    queryKey: QUERY_KEYS.adminExperience,
+    items: list.data,
+    persist: (ids) => adminApi.reorderExperience(ids),
+    onError: (caught) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t save the new order',
+        description: errorMessage(caught, 'The previous order was restored.'),
+      }),
+    onSettled: invalidate,
+  });
+
   const save = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       editing ? adminApi.updateExperience(editing.id, payload) : adminApi.createExperience(payload),
-    onSuccess: () => {
+    onSuccess: (item) => {
+      toast({ title: editing ? 'Entry updated' : `Added “${item.organization}”` });
       invalidate();
-      closeModal();
+      closeSheet();
     },
-    onError: (caught) =>
-      setError(caught instanceof ApiError ? caught.message : 'Could not save this entry.'),
+    onError: (caught) => setError(errorMessage(caught, 'Couldn’t save this entry.')),
   });
 
   const remove = useMutation({
-    mutationFn: (id: string) => adminApi.deleteExperience(id),
-    onSuccess: () => {
+    mutationFn: (item: Experience) => adminApi.deleteExperience(item.id),
+    onSuccess: (_result, item) => {
       setPendingDelete(null);
+      toast({ title: `Deleted “${item.organization}”` });
       invalidate();
     },
+    onError: (caught) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t delete entry',
+        description: errorMessage(caught, 'Please try again.'),
+      }),
   });
 
-  const reorder = useMutation({
-    mutationFn: (ids: string[]) => adminApi.reorderExperience(ids),
-    onSuccess: invalidate,
-  });
-
-  const closeModal = () => {
-    setEditing(null);
-    setCreating(false);
-    setValues(EMPTY);
+  const closeSheet = () => {
+    setSheetOpen(false);
     setError(null);
   };
 
   const openCreate = () => {
     setValues(EMPTY);
     setEditing(null);
-    setCreating(true);
+    setError(null);
+    setSheetOpen(true);
   };
 
   const openEdit = (item: Experience) => {
-    setValues({
-      organization: item.organization,
-      role: item.role,
-      description: item.description,
-      startDate: toMonth(item.startDate),
-      endDate: toMonth(item.endDate),
-      current: item.current,
-      location: item.location ?? '',
-      url: item.url ?? '',
-      imageUrl: item.imageUrl ?? '',
-      technologies: item.technologies.map((technology) => technology.name),
-      published: item.published,
-    });
+    setValues(toForm(item));
     setEditing(item);
-    setCreating(true);
+    setError(null);
+    setSheetOpen(true);
   };
 
-  const move = (index: number, direction: -1 | 1) => {
-    if (!list.data) return;
-    const next = [...list.data];
-    const target = index + direction;
-    if (target < 0 || target >= next.length) return;
-    const current = next[index];
-    const swap = next[target];
-    if (!current || !swap) return;
-    next[index] = swap;
-    next[target] = current;
-    reorder.mutate(next.map((item) => item.id));
-  };
+  useCreateIntent(openCreate);
+
+  const update = <K extends keyof FormValues>(key: K, value: FormValues[K]) =>
+    setValues((current) => ({ ...current, [key]: value }));
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -151,6 +177,14 @@ export default function AdminExperience() {
     }
     if (!values.startDate) {
       setError('A start date is required.');
+      return;
+    }
+    if (!values.current && values.endDate && values.endDate < values.startDate) {
+      setError('The end date can’t be before the start date.');
+      return;
+    }
+    if (values.url && !/^https?:\/\//.test(values.url)) {
+      setError('The link must start with http:// or https://');
       return;
     }
 
@@ -171,29 +205,30 @@ export default function AdminExperience() {
 
   return (
     <div className="space-y-6">
-      <AdminPageHeader
+      <PageHeader
         title="Experience"
-        description="Timeline entries shown on the home page and the experience page."
+        description="Timeline entries on the home and experience pages. Drag to reorder."
         actions={
-          <Button size="sm" onClick={openCreate} iconLeft={<Plus className="h-3.5 w-3.5" />}>
+          <Button size="sm" onClick={openCreate} iconLeft={<Plus className="h-4 w-4" />}>
             New entry
           </Button>
         }
       />
 
-      <Panel className="p-0">
+      <Panel padded={false}>
         {list.isLoading ? (
-          <LoadingState label="Loading experience" />
-        ) : list.isError || !list.data ? (
+          <ListSkeleton rows={4} />
+        ) : list.isError ? (
           <ErrorState
-            title="Could not load experience"
+            title="Couldn’t load experience"
+            description="The API didn’t respond."
             onRetry={() => list.refetch()}
-            description="The API did not respond."
           />
-        ) : list.data.length === 0 ? (
+        ) : ordered.length === 0 ? (
           <EmptyState
-            title="No experience entries"
-            description="Add the projects and roles you want to show."
+            title="No experience yet"
+            description="Add the roles and projects you want on your timeline."
+            icon={<Route className="h-5 w-5" />}
             action={
               <Button size="sm" onClick={openCreate}>
                 Add entry
@@ -201,99 +236,82 @@ export default function AdminExperience() {
             }
           />
         ) : (
-          <ul className="divide-y divide-white/[0.05]">
-            {list.data.map((item, index) => (
-              <li key={item.id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
-                <div className="flex flex-1 flex-col gap-1.5">
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    <h3 className="font-display text-lg text-haze-100">{item.organization}</h3>
+          <SortableList
+            items={ordered}
+            getKey={(item) => item.id}
+            getLabel={(item) => item.organization}
+            onChange={setOrdered}
+            onCommit={commit}
+            itemClassName="after:absolute after:bottom-0 after:left-12 after:right-0 after:h-px after:bg-sys-separator last:after:hidden"
+            renderItem={(item, handle) => (
+              <div className="flex items-start gap-2 py-3.5 pl-3 pr-3 sm:items-center sm:pr-4">
+                <span className="pt-0.5 sm:pt-0">{handle}</span>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <h3 className="text-[15px] font-semibold text-sys-label">
+                      {item.organization}
+                    </h3>
                     <Badge tone={item.current ? 'accent' : 'neutral'}>
                       {formatDateRange(item.startDate, item.endDate, item.current)}
                     </Badge>
                     {!item.published && <Badge tone="warning">Hidden</Badge>}
                   </div>
-                  <p className="text-xs text-accent-fuchsia/80">{item.role}</p>
-                  <p className="line-clamp-2 max-w-3xl text-sm text-haze-400">{item.description}</p>
+                  <p className="text-[13px] font-medium text-sys-secondary">{item.role}</p>
+                  <p className="line-clamp-2 max-w-3xl text-[13px] leading-5 text-sys-secondary sm:line-clamp-1">
+                    {item.description}
+                  </p>
                 </div>
-
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    aria-label="Move up"
-                    disabled={index === 0}
-                    onClick={() => move(index, -1)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-haze-400 transition-colors hover:text-white disabled:opacity-30"
-                  >
-                    <ArrowUp className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Move down"
-                    disabled={index === list.data!.length - 1}
-                    onClick={() => move(index, 1)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-haze-400 transition-colors hover:text-white disabled:opacity-30"
-                  >
-                    <ArrowDown className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Edit ${item.organization}`}
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <IconButton
+                    label={`Edit ${item.organization}`}
+                    icon={Pencil}
                     onClick={() => openEdit(item)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-haze-400 transition-colors hover:border-accent-violet/40 hover:text-white"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Delete ${item.organization}`}
+                  />
+                  <IconButton
+                    label={`Delete ${item.organization}`}
+                    icon={Trash2}
+                    tone="danger"
                     onClick={() => setPendingDelete(item)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-haze-400 transition-colors hover:border-rose-400/50 hover:text-rose-200"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  />
                 </div>
-              </li>
-            ))}
-          </ul>
+              </div>
+            )}
+          />
         )}
       </Panel>
 
-      <AdminModal
-        open={creating}
-        onClose={closeModal}
+      <Sheet
+        open={sheetOpen}
+        onClose={closeSheet}
         title={editing ? `Edit ${editing.organization}` : 'New experience entry'}
-        description="Dates are shown as years on the public timeline."
+        description="Dates appear as years on the public timeline."
         footer={
           <>
-            <Button variant="ghost" size="sm" type="button" onClick={closeModal}>
+            <Button variant="ghost" size="sm" type="button" onClick={closeSheet}>
               Cancel
             </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              type="submit"
-              form="experience-form"
-              loading={save.isPending}
-            >
-              {editing ? 'Save changes' : 'Create entry'}
+            <Button size="sm" type="submit" form={FORM_ID} loading={save.isPending}>
+              {editing ? 'Save' : 'Add entry'}
             </Button>
           </>
         }
       >
-        <form id="experience-form" onSubmit={onSubmit} className="space-y-5">
+        <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-5">
+          {error && <InlineAlert>{error}</InlineAlert>}
+
           <div className="grid gap-5 sm:grid-cols-2">
             <Input
               label="Organization"
               required
               value={values.organization}
-              onChange={(event) => setValues({ ...values, organization: event.target.value })}
+              onChange={(event) => update('organization', event.target.value)}
               placeholder="Tensei.uz"
             />
             <Input
               label="Role"
               required
               value={values.role}
-              onChange={(event) => setValues({ ...values, role: event.target.value })}
+              onChange={(event) => update('role', event.target.value)}
               placeholder="Founder & Frontend Developer"
             />
           </div>
@@ -303,7 +321,7 @@ export default function AdminExperience() {
             required
             rows={3}
             value={values.description}
-            onChange={(event) => setValues({ ...values, description: event.target.value })}
+            onChange={(event) => update('description', event.target.value)}
           />
 
           <div className="grid gap-5 sm:grid-cols-2">
@@ -312,37 +330,38 @@ export default function AdminExperience() {
               type="month"
               required
               value={values.startDate}
-              onChange={(event) => setValues({ ...values, startDate: event.target.value })}
+              onChange={(event) => update('startDate', event.target.value)}
             />
             <Input
               label="End date"
               type="month"
-              value={values.endDate}
-              onChange={(event) => setValues({ ...values, endDate: event.target.value })}
+              value={values.current ? '' : values.endDate}
+              onChange={(event) => update('endDate', event.target.value)}
               disabled={values.current}
-              hint={values.current ? 'Currently ongoing' : undefined}
+              hint={values.current ? 'Ongoing' : undefined}
             />
           </div>
 
           <Switch
             checked={values.current}
-            onChange={(checked) => setValues({ ...values, current: checked })}
+            onChange={(checked) => update('current', checked)}
             label="Current position"
-            description="Renders as “2024 — Present” and highlights the timeline node."
+            description="Shown as “2024 — Present” with a highlighted timeline node."
           />
 
           <div className="grid gap-5 sm:grid-cols-2">
             <Input
               label="Location"
               value={values.location}
-              onChange={(event) => setValues({ ...values, location: event.target.value })}
+              onChange={(event) => update('location', event.target.value)}
               placeholder="Remote"
             />
             <Input
               label="Link"
               type="url"
+              inputMode="url"
               value={values.url}
-              onChange={(event) => setValues({ ...values, url: event.target.value })}
+              onChange={(event) => update('url', event.target.value)}
               placeholder="https://…"
             />
           </div>
@@ -350,40 +369,33 @@ export default function AdminExperience() {
           <Input
             label="Preview image URL"
             value={values.imageUrl}
-            onChange={(event) => setValues({ ...values, imageUrl: event.target.value })}
+            onChange={(event) => update('imageUrl', event.target.value)}
             placeholder="Leave empty for generated artwork"
           />
 
-          <StringListInput
+          <TagInput
             label="Technologies"
-            multiline={false}
             value={values.technologies}
-            onChange={(next) => setValues({ ...values, technologies: next })}
-            placeholder="React"
-            hint="Press Enter to add."
+            onChange={(next) => update('technologies', next)}
+            placeholder="React, TypeScript…"
+            hint="Press Enter or comma to add."
           />
 
           <Switch
             checked={values.published}
-            onChange={(checked) => setValues({ ...values, published: checked })}
+            onChange={(checked) => update('published', checked)}
             label="Published"
             description="Hidden entries never reach the public site."
           />
-
-          {error && (
-            <p role="alert" className="text-sm text-rose-300">
-              {error}
-            </p>
-          )}
         </form>
-      </AdminModal>
+      </Sheet>
 
       <ConfirmDialog
         open={Boolean(pendingDelete)}
-        title={`Delete ${pendingDelete?.organization ?? 'entry'}?`}
+        title={`Delete “${pendingDelete?.organization ?? 'entry'}”?`}
         loading={remove.isPending}
         onCancel={() => setPendingDelete(null)}
-        onConfirm={() => pendingDelete && remove.mutate(pendingDelete.id)}
+        onConfirm={() => pendingDelete && remove.mutate(pendingDelete)}
       />
     </div>
   );

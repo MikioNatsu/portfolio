@@ -1,270 +1,302 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Eye, EyeOff, Pencil, Plus, Search, Star, StarOff, Trash2 } from 'lucide-react';
-import type { Project } from '@natsu/types';
-import { adminApi } from '@/api/client';
-import { PROJECT_STATUS_LABELS, QUERY_KEYS } from '@/lib/constants';
-import { AdminPageHeader, ConfirmDialog, Panel, Table, Td, Th } from '@/components/admin/AdminUI';
-import { Button } from '@/components/ui/Button';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AnimatePresence, motion } from 'framer-motion';
+import { ArrowUpRight, Eye, EyeOff, FolderKanban, Pencil, Plus, Star, Trash2 } from 'lucide-react';
+import type { Project, ProjectStatus } from '@natsu/types';
+import { adminApi, ApiError } from '@/api/client';
+import { EASE_IOS } from '@/animations/variants';
+import { Panel } from '@/components/admin/Card';
+import { IconButton } from '@/components/admin/IconButton';
+import { PageHeader } from '@/components/admin/PageHeader';
+import { Pagination } from '@/components/admin/Pagination';
+import { SearchField } from '@/components/admin/SearchField';
+import { SegmentedControl } from '@/components/admin/SegmentedControl';
+import { ConfirmDialog } from '@/components/admin/Sheet';
+import { ListSkeleton } from '@/components/admin/Skeleton';
 import { ProjectStatusBadge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { SmartImage } from '@/components/ui/SmartImage';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
-import { formatRelative } from '@/lib/utils';
+import { EmptyState, ErrorState } from '@/components/ui/States';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useToast } from '@/hooks/useToast';
+import { QUERY_KEYS } from '@/lib/constants';
+import { patchPaginatedItem, restoreQueries, type QuerySnapshot } from '@/lib/query';
+import { cn, formatRelative } from '@/lib/utils';
 
 const PAGE_SIZE = 10;
+const PROJECTS_KEY = ['admin', 'projects'] as const;
+
+const FILTERS = [
+  { value: '', label: 'All' },
+  { value: 'PUBLISHED', label: 'Live' },
+  { value: 'DRAFT', label: 'Drafts' },
+  { value: 'ARCHIVED', label: 'Archived' },
+] as const;
+
+type Filter = (typeof FILTERS)[number]['value'];
+
+const errorMessage = (error: unknown, fallback: string) =>
+  error instanceof ApiError ? error.message : fallback;
 
 export default function AdminProjects() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState<Filter>('');
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null);
+  const debouncedSearch = useDebouncedValue(search.trim());
 
   const projects = useQuery({
-    queryKey: QUERY_KEYS.adminProjects({ page, search, status }),
-    queryFn: () => adminApi.listProjects({ page, pageSize: PAGE_SIZE, search, status }),
+    queryKey: QUERY_KEYS.adminProjects({ page, search: debouncedSearch, status }),
+    queryFn: () =>
+      adminApi.listProjects({ page, pageSize: PAGE_SIZE, search: debouncedSearch, status }),
+    placeholderData: keepPreviousData,
   });
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['admin'] });
+    void queryClient.invalidateQueries({ queryKey: ['projects'] });
   };
 
-  const update = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: Record<string, unknown> }) =>
-      adminApi.updateProject(id, payload),
-    onSuccess: invalidate,
+  const update = useMutation<
+    Project,
+    unknown,
+    { project: Project; patch: Partial<Project> },
+    { snapshot: QuerySnapshot }
+  >({
+    mutationFn: ({ project, patch }) => adminApi.updateProject(project.id, patch),
+    onMutate: async ({ project, patch }) => ({
+      snapshot: await patchPaginatedItem<Project>(queryClient, PROJECTS_KEY, project.id, patch),
+    }),
+    onError: (error, _variables, context) => {
+      restoreQueries(queryClient, context?.snapshot);
+      toast({
+        tone: 'error',
+        title: 'Couldn’t update project',
+        description: errorMessage(error, 'Please try again.'),
+      });
+    },
+    onSettled: invalidate,
   });
 
   const remove = useMutation({
-    mutationFn: (id: string) => adminApi.deleteProject(id),
-    onSuccess: () => {
+    mutationFn: (project: Project) => adminApi.deleteProject(project.id),
+    onSuccess: (_result, project) => {
       setPendingDelete(null);
+      toast({ title: `Deleted “${project.title}”` });
       invalidate();
     },
+    onError: (error) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t delete project',
+        description: errorMessage(error, 'Please try again.'),
+      }),
   });
+
+  const togglePublished = (project: Project) => {
+    const next: ProjectStatus = project.status === 'PUBLISHED' ? 'DRAFT' : 'PUBLISHED';
+    update.mutate({ project, patch: { status: next } });
+  };
+
+  const data = projects.data;
+  const refreshing = projects.isPlaceholderData && projects.isFetching;
 
   return (
     <div className="space-y-6">
-      <AdminPageHeader
+      <PageHeader
         title="Projects"
         description="Create, publish and order the case studies shown on the public site."
         actions={
-          <Button to="/admin/projects/new" size="sm" iconLeft={<Plus className="h-3.5 w-3.5" />}>
+          <Button to="/admin/projects/new" size="sm" iconLeft={<Plus className="h-4 w-4" />}>
             New project
           </Button>
         }
       />
 
-      <Panel>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-haze-400" />
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
-              placeholder="Search projects…"
-              aria-label="Search projects"
-              className="w-full rounded-2xl border border-white/10 bg-ink-800/70 py-3 pl-11 pr-4 text-sm text-haze-100 placeholder:text-haze-400/70 focus:border-accent-violet/60 focus:outline-none focus:ring-4 focus:ring-accent-violet/12"
-            />
-          </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <SearchField
+          label="Search projects"
+          placeholder="Search projects"
+          value={search}
+          onChange={(value) => {
+            setSearch(value);
+            setPage(1);
+          }}
+          className="sm:max-w-xs sm:flex-1"
+        />
+        <SegmentedControl
+          label="Filter by status"
+          options={FILTERS}
+          value={status}
+          onChange={(value) => {
+            setStatus(value);
+            setPage(1);
+          }}
+          className="self-start sm:self-auto"
+        />
+      </div>
 
-          <div className="flex gap-2">
-            {['', 'PUBLISHED', 'DRAFT', 'ARCHIVED'].map((option) => (
-              <button
-                key={option || 'all'}
-                type="button"
-                onClick={() => {
-                  setStatus(option);
-                  setPage(1);
-                }}
-                className={
-                  status === option
-                    ? 'rounded-full border border-accent-violet/45 bg-accent-violet/12 px-3.5 py-2 text-xs text-white'
-                    : 'rounded-full border border-white/10 px-3.5 py-2 text-xs text-haze-400 transition-colors hover:text-haze-100'
-                }
-              >
-                {option
-                  ? PROJECT_STATUS_LABELS[option as keyof typeof PROJECT_STATUS_LABELS]
-                  : 'All'}
-              </button>
-            ))}
-          </div>
-        </div>
-      </Panel>
-
-      <Panel className="p-0">
+      <Panel padded={false}>
         {projects.isLoading ? (
-          <LoadingState label="Loading projects" />
-        ) : projects.isError || !projects.data ? (
+          <ListSkeleton rows={4} />
+        ) : projects.isError || !data ? (
           <ErrorState
-            title="Could not load projects"
-            description="The API did not respond with project data."
+            title="Couldn’t load projects"
+            description="The API didn’t respond with project data."
             onRetry={() => projects.refetch()}
           />
-        ) : projects.data.items.length === 0 ? (
+        ) : data.items.length === 0 ? (
           <EmptyState
-            title="No projects found"
-            description="Adjust the filters, or create your first project."
+            title={debouncedSearch || status ? 'No matching projects' : 'No projects yet'}
+            description={
+              debouncedSearch || status
+                ? 'Try a different search or filter.'
+                : 'Create your first case study to show it on the site.'
+            }
+            icon={<FolderKanban className="h-5 w-5" />}
             action={
-              <Button to="/admin/projects/new" size="sm">
-                Create project
-              </Button>
+              !debouncedSearch && !status ? (
+                <Button to="/admin/projects/new" size="sm">
+                  Create project
+                </Button>
+              ) : undefined
             }
           />
         ) : (
           <>
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Project</Th>
-                  <Th>Category</Th>
-                  <Th>Status</Th>
-                  <Th>Featured</Th>
-                  <Th>Updated</Th>
-                  <Th className="text-right">Actions</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {projects.data.items.map((project) => (
-                  <tr key={project.id} className="transition-colors hover:bg-white/[0.02]">
-                    <Td>
-                      <div className="flex items-center gap-3">
+            <div
+              className="hidden grid-cols-[minmax(0,1fr)_6.5rem_7rem_9.5rem] gap-4 border-b border-sys-separator px-4 py-2.5 text-[12px] font-medium text-sys-secondary md:grid"
+              aria-hidden="true"
+            >
+              <span>Project</span>
+              <span>Status</span>
+              <span>Updated</span>
+              <span className="text-right">Actions</span>
+            </div>
+
+            <ul
+              className={cn('transition-opacity duration-200', refreshing && 'opacity-60')}
+              aria-busy={refreshing}
+            >
+              <AnimatePresence initial={false}>
+                {data.items.map((project) => (
+                  <motion.li
+                    key={project.id}
+                    layout="position"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.3, ease: EASE_IOS }}
+                    className="relative overflow-hidden after:absolute after:bottom-0 after:left-4 after:right-0 after:h-px after:bg-sys-separator last:after:hidden md:after:left-[4.25rem]"
+                  >
+                    <div className="flex flex-col gap-3 px-4 py-3 md:grid md:grid-cols-[minmax(0,1fr)_6.5rem_7rem_9.5rem] md:items-center md:gap-4">
+                      <div className="flex min-w-0 items-center gap-3">
                         <SmartImage
                           src={project.coverImage}
                           alt=""
                           label={project.title}
                           accent={project.accentColor}
                           aspect="aspect-square"
-                          className="h-11 w-11 shrink-0 rounded-xl border border-white/10"
+                          className="h-11 w-11 shrink-0 rounded-[10px]"
                           seed={3}
                         />
                         <span className="min-w-0">
                           <Link
-                            to={`/projects/${project.slug}`}
-                            className="block truncate text-sm text-haze-100 hover:text-white"
+                            to={`/admin/projects/${project.id}/edit`}
+                            className="block truncate text-sm font-medium text-sys-label hover:text-sys-accent"
                           >
                             {project.title}
                           </Link>
-                          <span className="block truncate text-2xs text-haze-400">
-                            /{project.slug}
+                          <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-sys-secondary">
+                            <span className="truncate">{project.category}</span>
+                            {project.status === 'PUBLISHED' && (
+                              <a
+                                href={`/projects/${project.slug}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex shrink-0 items-center gap-0.5 text-sys-accent hover:underline"
+                              >
+                                /{project.slug}
+                                <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
+                                <span className="sr-only">(opens the live page in a new tab)</span>
+                              </a>
+                            )}
                           </span>
                         </span>
                       </div>
-                    </Td>
-                    <Td className="text-xs text-haze-300">{project.category}</Td>
-                    <Td>
-                      <ProjectStatusBadge status={project.status} />
-                    </Td>
-                    <Td>
-                      <button
-                        type="button"
-                        aria-label={project.featured ? 'Unfeature project' : 'Feature project'}
-                        onClick={() =>
-                          update.mutate({
-                            id: project.id,
-                            payload: { featured: !project.featured },
-                          })
-                        }
-                        className="inline-flex items-center gap-1.5 text-xs text-haze-400 transition-colors hover:text-accent-fuchsia"
-                      >
-                        {project.featured ? (
-                          <Star className="h-3.5 w-3.5 fill-accent-fuchsia text-accent-fuchsia" />
-                        ) : (
-                          <StarOff className="h-3.5 w-3.5" />
-                        )}
-                        {project.featured ? 'Featured' : 'Not featured'}
-                      </button>
-                    </Td>
-                    <Td className="whitespace-nowrap text-xs text-haze-400">
-                      {formatRelative(project.updatedAt)}
-                    </Td>
-                    <Td>
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          aria-label={
-                            project.status === 'PUBLISHED' ? 'Unpublish project' : 'Publish project'
-                          }
-                          onClick={() =>
-                            update.mutate({
-                              id: project.id,
-                              payload: {
-                                status: project.status === 'PUBLISHED' ? 'DRAFT' : 'PUBLISHED',
-                              },
-                            })
-                          }
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-haze-400 transition-colors hover:border-accent-violet/40 hover:text-white"
-                        >
-                          {project.status === 'PUBLISHED' ? (
-                            <EyeOff className="h-3.5 w-3.5" />
-                          ) : (
-                            <Eye className="h-3.5 w-3.5" />
-                          )}
-                        </button>
-                        <Link
-                          to={`/admin/projects/${project.id}/edit`}
-                          aria-label={`Edit ${project.title}`}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-haze-400 transition-colors hover:border-accent-violet/40 hover:text-white"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Link>
-                        <button
-                          type="button"
-                          aria-label={`Delete ${project.title}`}
-                          onClick={() => setPendingDelete(project)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-haze-400 transition-colors hover:border-rose-400/50 hover:text-rose-200"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
 
-            {projects.data.totalPages > 1 && (
-              <div className="flex items-center justify-between gap-4 border-t border-white/[0.06] px-5 py-4">
-                <p className="text-2xs uppercase tracking-[0.16em] text-haze-400">
-                  Page {projects.data.page} of {projects.data.totalPages} · {projects.data.total}{' '}
-                  total
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="subtle"
-                    size="sm"
-                    disabled={page <= 1}
-                    onClick={() => setPage((value) => Math.max(1, value - 1))}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="subtle"
-                    size="sm"
-                    disabled={page >= projects.data.totalPages}
-                    onClick={() => setPage((value) => value + 1)}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            )}
+                      <div className="flex items-center justify-between gap-3 md:contents">
+                        <span className="flex items-center gap-2">
+                          <ProjectStatusBadge status={project.status} />
+                          <span className="text-[12px] text-sys-secondary md:hidden">
+                            · {formatRelative(project.updatedAt)}
+                          </span>
+                        </span>
+                        <time
+                          dateTime={project.updatedAt}
+                          className="hidden text-[13px] text-sys-secondary md:block"
+                        >
+                          {formatRelative(project.updatedAt)}
+                        </time>
+
+                        <div className="flex items-center justify-end gap-0.5">
+                          <IconButton
+                            label="Feature on home page"
+                            icon={Star}
+                            active={project.featured}
+                            onClick={() =>
+                              update.mutate({ project, patch: { featured: !project.featured } })
+                            }
+                            className={
+                              project.featured ? 'text-sys-yellow hover:text-sys-yellow' : undefined
+                            }
+                            aria-pressed={project.featured}
+                          />
+                          <IconButton
+                            label={project.status === 'PUBLISHED' ? 'Unpublish' : 'Publish'}
+                            icon={project.status === 'PUBLISHED' ? EyeOff : Eye}
+                            onClick={() => togglePublished(project)}
+                          />
+                          <IconButton
+                            label={`Edit ${project.title}`}
+                            icon={Pencil}
+                            to={`/admin/projects/${project.id}/edit`}
+                          />
+                          <IconButton
+                            label={`Delete ${project.title}`}
+                            icon={Trash2}
+                            tone="danger"
+                            onClick={() => setPendingDelete(project)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </motion.li>
+                ))}
+              </AnimatePresence>
+            </ul>
+
+            <Pagination
+              page={data.page}
+              totalPages={data.totalPages}
+              total={data.total}
+              noun={data.total === 1 ? 'project' : 'projects'}
+              onPageChange={setPage}
+            />
           </>
         )}
       </Panel>
 
       <ConfirmDialog
         open={Boolean(pendingDelete)}
-        title={`Delete ${pendingDelete?.title ?? 'project'}?`}
+        title={`Delete “${pendingDelete?.title ?? 'project'}”?`}
         description="The case study and its gallery will be removed permanently."
         loading={remove.isPending}
         onCancel={() => setPendingDelete(null)}
-        onConfirm={() => pendingDelete && remove.mutate(pendingDelete.id)}
+        onConfirm={() => pendingDelete && remove.mutate(pendingDelete)}
       />
     </div>
   );

@@ -1,24 +1,38 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { CircleAlert, ArrowRight, Lock, Mail } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Field';
+import { motion, useAnimationControls } from 'framer-motion';
+import { ArrowRight, CircleAlert, LoaderCircle, LockKeyhole } from 'lucide-react';
+import { ApiError } from '@/api/client';
+import { EASE_IOS } from '@/animations/variants';
 import { Sparkle } from '@/components/layout/Logomark';
 import { useAuth } from '@/hooks/useAuth';
 import { usePageMeta } from '@/hooks/usePageMeta';
-import { ApiError } from '@/api/client';
+import { SITE_NAME } from '@/lib/constants';
+import { cn } from '@/lib/utils';
+
+/** The macOS login-window "no" shake. */
+const SHAKE = { x: [0, -12, 11, -8, 7, -4, 2, 0], transition: { duration: 0.5, ease: 'easeOut' } };
+
+const ROW =
+  'block w-full bg-transparent px-4 py-3.5 text-base text-sys-label placeholder:text-sys-tertiary focus:outline-none disabled:opacity-60 sm:text-[15px]';
 
 export default function AdminLogin() {
   const navigate = useNavigate();
   const location = useLocation();
   const { login, isAuthenticated } = useAuth();
+  const shake = useAnimationControls();
+  const emailId = useId();
+  const passwordId = useId();
+  const errorId = useId();
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [failures, setFailures] = useState(0);
 
-  usePageMeta({ title: 'Sign in — Natsu Admin', noindex: true });
+  usePageMeta({ title: `Sign in — ${SITE_NAME} Admin`, noindex: true });
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -27,14 +41,28 @@ export default function AdminLogin() {
     }
   }, [isAuthenticated, location.state, navigate]);
 
+  // After a failed attempt, return focus to the first field that needs it.
+  // Runs once the inputs are re-enabled (they're disabled while signing in).
+  useEffect(() => {
+    if (failures === 0 || login.isPending) return;
+    const target = emailRef.current?.value.trim() ? passwordRef.current : emailRef.current;
+    target?.focus();
+  }, [failures, login.isPending]);
+
   if (isAuthenticated) return <Navigate to="/admin" replace />;
+
+  const fail = (message: string) => {
+    setError(message);
+    setFailures((count) => count + 1);
+    void shake.start(SHAKE);
+  };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
 
     if (!email.trim() || !password) {
-      setError('Email and password are both required.');
+      fail('Enter your email and password.');
       return;
     }
 
@@ -42,10 +70,11 @@ export default function AdminLogin() {
       await login.mutateAsync({ email: email.trim(), password });
       navigate('/admin', { replace: true });
     } catch (caught) {
-      setError(
+      setPassword('');
+      fail(
         caught instanceof ApiError
           ? caught.status === 401
-            ? 'Those credentials do not match our records.'
+            ? 'Incorrect email or password.'
             : caught.message
           : 'Unable to sign in right now.',
       );
@@ -53,91 +82,113 @@ export default function AdminLogin() {
   };
 
   return (
-    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-ink-950 px-4 py-12">
-      <div className="absolute inset-0 grid-bg opacity-[0.2]" aria-hidden="true" />
+    <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-sys-canvas px-4 py-12">
       <div
-        className="absolute left-1/2 top-0 h-[36rem] w-[36rem] -translate-x-1/2 -translate-y-1/3 rounded-full blur-[140px]"
-        style={{ background: 'radial-gradient(circle, rgba(124,58,237,0.32), transparent 70%)' }}
+        className="pointer-events-none absolute left-1/2 top-[-18rem] h-[36rem] w-[36rem] -translate-x-1/2 rounded-full opacity-60 blur-[120px]"
+        style={{
+          background: 'radial-gradient(circle, rgb(var(--sys-accent) / 0.35), transparent 70%)',
+        }}
         aria-hidden="true"
       />
 
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        className="relative w-full max-w-md"
+        initial={{ opacity: 0, y: 16, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.6, ease: EASE_IOS }}
+        className="relative w-full max-w-[22rem] text-center"
       >
-        <div className="rounded-[2rem] border border-white/[0.08] bg-ink-800/70 p-7 backdrop-blur-2xl sm:p-9">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-accent-violet/30 bg-accent-violet/12">
-              <Sparkle size={18} className="text-accent-fuchsia" />
-            </span>
-            <div className="space-y-1">
-              <h1 className="font-display text-2xl font-semibold text-haze-100">Welcome back</h1>
-              <p className="text-sm text-haze-400">Sign in to manage the portfolio content.</p>
-            </div>
-          </div>
+        <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-[18px] bg-gradient-to-br from-[#8E44EC] to-[#FF2D78] text-white shadow-[0_12px_32px_-10px_rgba(142,68,236,0.7),inset_0_1px_0_rgba(255,255,255,0.25)]">
+          <Sparkle size={26} />
+        </span>
+        <h1 className="mt-6 text-[28px] font-semibold tracking-[-0.025em] text-sys-label">
+          Sign in to {SITE_NAME}
+        </h1>
+        <p className="mt-1.5 text-[15px] text-sys-secondary">Manage your portfolio content.</p>
 
-          <form onSubmit={onSubmit} className="mt-8 space-y-5" noValidate>
-            <Input
-              label="Email"
+        <motion.form animate={shake} onSubmit={onSubmit} noValidate className="mt-8 text-left">
+          <div
+            className={cn(
+              'overflow-hidden rounded-[14px] border bg-sys-field shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] duration-200 focus-within:border-sys-accent focus-within:ring-4 focus-within:ring-sys-accent/20',
+              error ? 'border-sys-red' : 'border-sys-field-border',
+            )}
+          >
+            <label htmlFor={emailId} className="sr-only">
+              Email
+            </label>
+            <input
+              ref={emailRef}
+              id={emailId}
               type="email"
               name="email"
               autoComplete="username"
-              placeholder="admin@example.com"
+              placeholder="Email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              required
               disabled={login.isPending}
-            />
-
-            <Input
-              label="Password"
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? errorId : undefined}
               required
-              disabled={login.isPending}
+              autoFocus
+              className={ROW}
             />
-
-            {error && (
-              <div
-                role="alert"
-                className="flex items-start gap-2.5 rounded-2xl border border-rose-400/30 bg-rose-500/[0.08] px-4 py-3 text-sm text-rose-200"
+            <div className="mx-4 h-px bg-sys-separator" />
+            <div className="flex items-center pr-2">
+              <label htmlFor={passwordId} className="sr-only">
+                Password
+              </label>
+              <input
+                ref={passwordRef}
+                id={passwordId}
+                type="password"
+                name="password"
+                autoComplete="current-password"
+                placeholder="Password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                disabled={login.isPending}
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? errorId : undefined}
+                required
+                className={ROW}
+              />
+              <button
+                type="submit"
+                aria-label="Sign in"
+                disabled={login.isPending}
+                className={cn(
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-[background-color,border-color,color,transform] duration-200 active:scale-90',
+                  email && password
+                    ? 'border-transparent bg-sys-accent-fill text-white'
+                    : 'border-sys-field-border text-sys-secondary',
+                )}
               >
-                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <Button
-              type="submit"
-              fullWidth
-              size="lg"
-              loading={login.isPending}
-              iconRight={<ArrowRight className="h-4 w-4" />}
-            >
-              {login.isPending ? 'Signing in' : 'Sign in'}
-            </Button>
-          </form>
-
-          <div className="mt-7 space-y-2.5 border-t border-white/[0.06] pt-6">
-            <p className="flex items-center gap-2 text-2xs text-haze-400">
-              <Mail className="h-3 w-3" />
-              Seeded credentials come from <code className="text-haze-300">ADMIN_EMAIL</code>
-            </p>
-            <p className="flex items-center gap-2 text-2xs text-haze-400">
-              <Lock className="h-3 w-3" />
-              Sessions are JWT-based and expire automatically
-            </p>
+                {login.isPending ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
+            </div>
           </div>
-        </div>
 
-        <p className="mt-6 text-center text-2xs text-haze-400">
-          Protected area — activity is logged.
+          <div className="min-h-[2.75rem] pt-3" aria-live="assertive">
+            {error && (
+              <motion.p
+                id={errorId}
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center justify-center gap-1.5 text-[13px] font-medium text-sys-red-ink"
+              >
+                <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                {error}
+              </motion.p>
+            )}
+          </div>
+        </motion.form>
+
+        <p className="mt-6 flex items-center justify-center gap-1.5 text-[12px] text-sys-secondary">
+          <LockKeyhole className="h-3 w-3" aria-hidden="true" />
+          Protected area. Sessions expire automatically.
         </p>
       </motion.div>
     </div>

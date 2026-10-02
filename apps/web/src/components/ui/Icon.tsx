@@ -74,6 +74,7 @@ const REGISTRY: Record<string, LucideIcon> = {
 
   // Profile stats & UI
   sparkles: Sparkles,
+  layers: Layers,
   heart: Heart,
   users: Users,
   zap: Zap,

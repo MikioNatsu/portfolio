@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { SmartImage } from '@/components/ui/SmartImage';
 import { Badge, ProjectStatusBadge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Input, Switch } from '@/components/ui/Field';
+import { SkinContext } from '@/components/ui/skin';
 
 describe('SmartImage', () => {
   it('renders generated artwork when no source is provided', () => {
@@ -62,5 +65,48 @@ describe('Button', () => {
   it('is disabled while loading', () => {
     render(<Button loading>Save</Button>);
     expect(screen.getByRole('button')).toBeDisabled();
+  });
+});
+
+describe('skins', () => {
+  it('keeps the cinematic look on the public site by default', () => {
+    render(<Input label="Email" />);
+    expect(screen.getByLabelText('Email').className).toContain('bg-ink-800/70');
+  });
+
+  it('switches shared primitives to the system look inside the admin', () => {
+    render(
+      <SkinContext.Provider value="system">
+        <Input label="Email" />
+        <Button>Save</Button>
+        <Badge tone="success">Live</Badge>
+      </SkinContext.Provider>,
+    );
+    expect(screen.getByLabelText('Email').className).toContain('bg-sys-field');
+    expect(screen.getByRole('button', { name: 'Save' }).className).toContain('bg-sys-accent-fill');
+    expect(screen.getByText('Live').className).toContain('text-sys-green-ink');
+  });
+
+  it('links hints and errors to their control for assistive tech', () => {
+    render(<Input label="Slug" hint="Used in the URL" error="Required" />);
+    const input = screen.getByLabelText('Slug');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input.getAttribute('aria-describedby')).toMatch(/-error .*-hint$/);
+  });
+});
+
+describe('Switch', () => {
+  it('toggles and is named by its label', async () => {
+    const onChange = vi.fn();
+    render(
+      <SkinContext.Provider value="system">
+        <Switch checked={false} onChange={onChange} label="Featured" description="Home page" />
+      </SkinContext.Provider>,
+    );
+    const toggle = screen.getByRole('switch', { name: 'Featured' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle).toHaveAccessibleDescription('Home page');
+    await userEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith(true);
   });
 });

@@ -1,166 +1,103 @@
-import { Suspense, useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
-import { ExternalLink, LogOut, Menu, X } from 'lucide-react';
-import { ADMIN_NAV_LINKS } from '@/lib/constants';
-import { cn, initials } from '@/lib/utils';
-import { useAuth } from '@/hooks/useAuth';
+import { Suspense, useEffect, useState } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { sysPageEnter } from '@/animations/variants';
+import { useLogout } from '@/hooks/useAuth';
 import { usePageMeta } from '@/hooks/usePageMeta';
-import { setAuthToken } from '@/api/client';
-import { Icon } from '@/components/ui/Icon';
-import { LoadingState } from '@/components/ui/States';
-import { Logomark } from '@/components/layout/Logomark';
+import { ToolbarTitleContext } from '@/hooks/useToolbarTitle';
+import { CommandPalette } from '@/components/admin/CommandPalette';
+import { MobileDrawer } from '@/components/admin/MobileDrawer';
+import { Sidebar } from '@/components/admin/Sidebar';
+import { PageSkeleton } from '@/components/admin/Skeleton';
+import { Toolbar } from '@/components/admin/Toolbar';
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
-  const { user } = useAuth();
-
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex h-16 items-center gap-3 border-b border-white/[0.06] px-5">
-        <Logomark size="sm" />
-        <span className="rounded-full border border-accent-violet/30 bg-accent-violet/10 px-2 py-0.5 text-2xs uppercase tracking-[0.16em] text-accent-fuchsia">
-          Admin
-        </span>
-      </div>
-
-      <nav aria-label="Admin" className="flex-1 space-y-1 overflow-y-auto p-3">
-        {ADMIN_NAV_LINKS.map((link) => (
-          <NavLink
-            key={link.to}
-            to={link.to}
-            end={link.to === '/admin'}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors duration-200',
-                isActive
-                  ? 'border border-accent-violet/25 bg-accent-violet/12 text-white'
-                  : 'border border-transparent text-haze-400 hover:bg-white/[0.04] hover:text-haze-100',
-              )
-            }
-          >
-            <Icon name={link.icon} size={16} />
-            {link.label}
-          </NavLink>
-        ))}
-      </nav>
-
-      <div className="space-y-3 border-t border-white/[0.06] p-3">
-        <Link
-          to="/"
-          className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-haze-400 transition-colors hover:bg-white/[0.04] hover:text-haze-100"
-        >
-          <ExternalLink className="h-4 w-4" />
-          View site
-        </Link>
-
-        {user && (
-          <div className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-accent-purple to-accent-pink text-xs font-semibold text-white">
-              {initials(user.name)}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-xs text-haze-100">{user.name}</span>
-              <span className="block truncate text-2xs text-haze-400">{user.email}</span>
-            </span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
+/** Authenticated admin chrome: sidebar, toolbar, command palette and routes. */
 export function AdminLayout() {
-  const [open, setOpen] = useState(false);
-  const navigate = useNavigate();
-  const { logout } = useAuth();
+  const location = useLocation();
+  const signOut = useLogout();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // Each opening is a fresh session (new key → fresh state), so a previous
+  // query can never flash or merge with what the user starts typing.
+  const [palette, setPalette] = useState({ open: false, session: 0 });
+  const openPalette = () =>
+    setPalette((current) =>
+      current.open ? current : { open: true, session: current.session + 1 },
+    );
+  const [compactTitle, setCompactTitle] = useState<string | null>(null);
 
   usePageMeta({ title: 'Admin — Natsu', noindex: true });
 
-  const onLogout = async () => {
-    try {
-      await logout.mutateAsync();
-    } finally {
-      setAuthToken(null);
-      navigate('/admin/login', { replace: true });
-    }
-  };
+  // ⌘K / Ctrl+K toggles the command palette from anywhere.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPalette((current) =>
+          current.open ? { ...current, open: false } : { open: true, session: current.session + 1 },
+        );
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Each page starts at the top, and navigating closes the drawer.
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    setDrawerOpen(false);
+  }, [location.pathname]);
 
   return (
-    <div className="min-h-dvh bg-ink-950">
-      <div className="mx-auto flex min-h-dvh max-w-[1600px]">
-        {/* Desktop sidebar */}
-        <aside className="hidden w-64 shrink-0 border-r border-white/[0.06] bg-ink-900/60 lg:block">
-          <div className="sticky top-0 h-dvh">
-            <SidebarContent />
-          </div>
+    <ToolbarTitleContext.Provider value={setCompactTitle}>
+      <div className="min-h-dvh bg-sys-canvas text-sys-label">
+        <a
+          href="#admin-main"
+          className="sr-only z-[200] rounded-full bg-sys-accent-fill px-4 py-2 text-sm font-medium text-white focus:not-sr-only focus:fixed focus:left-4 focus:top-3"
+        >
+          Skip to content
+        </a>
+
+        <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-sys-separator bg-sys-surface/60 lg:block">
+          <Sidebar layoutGroupId="sidebar-desktop" />
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          {/* Topbar */}
-          <header className="sticky top-0 z-40 flex h-16 items-center gap-3 border-b border-white/[0.06] bg-ink-900/80 px-4 backdrop-blur-xl sm:px-6">
-            <button
-              type="button"
-              onClick={() => setOpen(true)}
-              aria-label="Open admin navigation"
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-haze-300 lg:hidden"
+        <div className="lg:pl-64">
+          <Toolbar
+            title={compactTitle}
+            onOpenMenu={() => setDrawerOpen(true)}
+            onOpenSearch={openPalette}
+            onSignOut={signOut}
+          />
+
+          <main
+            id="admin-main"
+            tabIndex={-1}
+            className="mx-auto w-full max-w-[84rem] px-4 pb-28 pt-3 outline-none sm:px-6 lg:px-8 lg:pt-5"
+          >
+            <motion.div
+              key={location.pathname}
+              variants={sysPageEnter}
+              initial="hidden"
+              animate="visible"
             >
-              <Menu className="h-4 w-4" />
-            </button>
-
-            <p className="text-2xs uppercase tracking-[0.2em] text-haze-400">Content management</p>
-
-            <button
-              type="button"
-              onClick={onLogout}
-              className="ml-auto inline-flex items-center gap-2 rounded-full border border-white/10 px-3.5 py-2 text-xs text-haze-300 transition-colors hover:border-rose-400/40 hover:text-rose-200"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              Sign out
-            </button>
-          </header>
-
-          <main className="flex-1 px-4 py-6 sm:px-6 sm:py-8">
-            <Suspense fallback={<LoadingState label="Loading" />}>
-              <Outlet />
-            </Suspense>
+              <Suspense fallback={<PageSkeleton />}>
+                <Outlet />
+              </Suspense>
+            </motion.div>
           </main>
         </div>
-      </div>
 
-      {/* Mobile drawer */}
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-ink-950/80 backdrop-blur-sm lg:hidden"
-            onClick={() => setOpen(false)}
-          >
-            <motion.aside
-              initial={{ x: '-100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              onClick={(event) => event.stopPropagation()}
-              className="h-full w-72 border-r border-white/[0.08] bg-ink-900"
-            >
-              <div className="flex justify-end p-3">
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  aria-label="Close navigation"
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 text-haze-400"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <SidebarContent onNavigate={() => setOpen(false)} />
-            </motion.aside>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+        <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+          <Sidebar layoutGroupId="sidebar-drawer" onNavigate={() => setDrawerOpen(false)} />
+        </MobileDrawer>
+
+        <CommandPalette
+          key={palette.session}
+          open={palette.open}
+          onClose={() => setPalette((current) => ({ ...current, open: false }))}
+          onSignOut={signOut}
+        />
+      </div>
+    </ToolbarTitleContext.Provider>
   );
 }
